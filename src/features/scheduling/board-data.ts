@@ -123,6 +123,22 @@ export function unassignedOn(date: string): BoardVisit[] {
     })
 }
 
+let newVisitSeq = 0
+
+/**
+ * A visit scheduled from the Schedule Visit page. It joins the unassigned
+ * pool, so the existing Assign Caregiver flow — with its eligibility checks —
+ * is how it gets a caregiver. Held in memory for the session.
+ */
+export function addUnassignedVisit(slot: Omit<UnassignedSlot, 'id'>): string {
+  newVisitSeq += 1
+  const id = `un-new-${newVisitSeq}`
+  unassigned.push({ ...slot, id })
+  // That day's board was memoised without it.
+  boardCache.delete(slot.date)
+  return id
+}
+
 export function unassignedReason(id: string): string {
   return unassigned.find((s) => s.id === id)?.reason ?? ''
 }

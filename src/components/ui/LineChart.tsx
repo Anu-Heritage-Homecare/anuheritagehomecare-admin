@@ -1,5 +1,3 @@
-import { useId } from 'react'
-
 import { cn } from '@/lib/cn'
 
 export interface LinePoint {
@@ -18,17 +16,6 @@ interface LineChartProps {
   columns?: [string, string]
 }
 
-/*
- * Tick text is sized in viewBox units, not CSS pixels: the SVG scales to the
- * container, so a `text-[13px]` class would render at ~6px inside a 320px
- * viewport. 20 units lands near 9px there and 13px on a desktop panel — and the
- * padding below is sized to fit "₦14.5M" at that size.
- */
-const WIDTH = 640
-const HEIGHT = 240
-const TICK_SIZE = 20
-const PAD = { top: 14, right: 14, bottom: 34, left: 78 }
-
 /** Rounds up to a readable axis ceiling: 293,950 → 300,000. */
 function ceiling(max: number): number {
   if (max <= 0) return 1
@@ -36,9 +23,21 @@ function ceiling(max: number): number {
   return Math.ceil(max / (magnitude / 2)) * (magnitude / 2)
 }
 
+const TICKS = [0, 0.25, 0.5, 0.75, 1]
+/** Percent of the plot width left empty before the first and after the last point. */
+const X_INSET = 7
+
 /**
- * Dependency-free trend line. The path is decorative; the same figures are
- * exposed as a visually-hidden table so the trend isn't sighted-only.
+ * Dependency-free trend line.
+ *
+ * The SVG draws only strokes, stretched to the plot with
+ * `preserveAspectRatio="none"` and non-scaling strokes. Labels and dots are
+ * HTML positioned by percentage: text inside a scaled SVG tracks the chart's
+ * width, which put 20px axis labels on a desktop panel and 6px ones on a
+ * phone, and a stretched circle would draw as an ellipse.
+ *
+ * The path is decorative; the same figures are exposed as a visually-hidden
+ * table so the trend isn't sighted-only.
  */
 export function LineChart({
   points,
@@ -47,101 +46,95 @@ export function LineChart({
   caption,
   columns = ['Period', 'Value'],
 }: LineChartProps) {
-  const gradientId = useId()
   if (points.length < 2) return null
 
   const max = ceiling(Math.max(...points.map((p) => p.value)))
-  const plotW = WIDTH - PAD.left - PAD.right
-  const plotH = HEIGHT - PAD.top - PAD.bottom
-  const step = plotW / (points.length - 1)
-
   const coords = points.map((p, i) => ({
     ...p,
-    x: PAD.left + i * step,
-    y: PAD.top + (1 - p.value / max) * plotH,
+    // Inset from both ends so the first and last labels, centred on their
+    // points, clear the y-axis and the panel edge.
+    x: X_INSET + (i / (points.length - 1)) * (100 - 2 * X_INSET),
+    y: (1 - p.value / max) * 100,
   }))
-
-  const line = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ')
-  const area = `${PAD.left},${PAD.top + plotH} ${line} ${PAD.left + plotW},${PAD.top + plotH}`
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
+  const line = coords.map((c) => `${c.x},${c.y}`).join(' ')
 
   return (
     <>
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        aria-hidden="true"
-        focusable="false"
-        // aspect ratio rather than a fixed height: with `meet` scaling a fixed
-        // height letterboxes the plot and shrinks the tick text to ~4px at 320.
-        className="aspect-[640/240] w-full"
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-          </linearGradient>
-        </defs>
+      <div aria-hidden="true" className="text-ink-subtle flex text-xs">
+        {/* y-axis labels */}
+        <div className="relative h-44 w-12 shrink-0 sm:h-52">
+          {TICKS.map((t) => (
+            <span
+              key={t}
+              className="absolute right-3 -translate-y-1/2 whitespace-nowrap tabular-nums"
+              style={{ top: `${(1 - t) * 100}%` }}
+            >
+              {formatTick(max * t)}
+            </span>
+          ))}
+        </div>
 
-        {ticks.map((t) => {
-          const y = PAD.top + (1 - t) * plotH
-          return (
-            <g key={t}>
-              <line
-                x1={PAD.left}
-                x2={PAD.left + plotW}
-                y1={y}
-                y2={y}
-                className="text-line"
+        <div className="min-w-0 flex-1">
+          <div className="relative h-44 sm:h-52">
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              focusable="false"
+              className="absolute inset-0 size-full overflow-visible"
+            >
+              {TICKS.map((t) => (
+                <line
+                  key={t}
+                  x1={0}
+                  x2={100}
+                  y1={(1 - t) * 100}
+                  y2={(1 - t) * 100}
+                  className="text-line"
+                  stroke="currentColor"
+                  strokeWidth={1}
+                  strokeDasharray={t === 0 ? undefined : '4 4'}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              <polyline
+                points={line}
+                fill="none"
                 stroke="currentColor"
-                strokeWidth={1}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
+                className="text-brand-600"
               />
-              <text
-                x={PAD.left - 10}
-                y={y + TICK_SIZE / 3}
-                textAnchor="end"
-                fontSize={TICK_SIZE}
-                className="fill-current"
+            </svg>
+
+            {coords.map((c) => (
+              <span
+                key={c.label}
+                className="bg-surface border-brand-600 absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
+                style={{ left: `${c.x}%`, top: `${c.y}%` }}
+              />
+            ))}
+          </div>
+
+          {/* x-axis labels. Under 640px only every other one is drawn — six
+              "Feb 2026"s collide at phone width. The table carries them all. */}
+          <div className="relative mt-3 h-4">
+            {coords.map((c, i) => (
+              <span
+                key={c.label}
+                className={cn(
+                  'absolute -translate-x-1/2 whitespace-nowrap',
+                  i % 2 !== 0 && 'max-sm:hidden',
+                )}
+                style={{ left: `${c.x}%` }}
               >
-                {formatTick(max * t)}
-              </text>
-            </g>
-          )
-        })}
-
-        <polygon points={area} fill={`url(#${gradientId})`} />
-        <polyline
-          points={line}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-        {coords.map((c) => (
-          <circle key={c.label} cx={c.x} cy={c.y} r={2.5} fill="currentColor" />
-        ))}
-
-        {coords.map((c, i) => (
-          <text
-            key={`${c.label}-tick`}
-            x={c.x}
-            y={HEIGHT - 10}
-            textAnchor="middle"
-            fontSize={TICK_SIZE}
-            /* Twelve labels collide below ~30px of width each; on narrow
-               viewports only every third one is drawn. The sr-only table
-               carries the full set regardless. */
-            className={cn(
-              'fill-current',
-              i % 3 !== 0 && i !== points.length - 1 && 'max-sm:hidden',
-            )}
-          >
-            {c.label}
-          </text>
-        ))}
-      </svg>
+                {c.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <table className="sr-only">
         <caption>{caption}</caption>

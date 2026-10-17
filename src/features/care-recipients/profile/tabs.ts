@@ -33,30 +33,45 @@ export interface TabAction {
   label: string
   icon: LucideIcon
   primary?: boolean
+  /** Where the button goes, given the recipient's id. Absent: not built yet. */
+  to?: (recipientId: string) => string
+  /** Prints the page instead of navigating; the browser saves it as a PDF. */
+  print?: boolean
 }
 
 const defaultActions: TabAction[] = [
-  { label: 'Edit Profile', icon: SquarePen },
-  { label: 'Schedule Visit', icon: CalendarPlus, primary: true },
+  { label: 'Edit Profile', icon: SquarePen, to: (id) => `/care-recipients/${id}/edit` },
+  {
+    label: 'Schedule Visit',
+    icon: CalendarPlus,
+    primary: true,
+    to: (id) => `/scheduling/visits/new?recipient=${id}`,
+  },
 ]
 
 /** Header buttons change with the active tab; anything unlisted falls back. */
 const actionsByTab: Record<string, TabAction[]> = {
   'care-plan': [
-    { label: 'Edit Care Plan', icon: SquarePen, primary: true },
-    { label: 'Print', icon: Printer },
+    {
+      label: 'Edit Care Plan',
+      icon: SquarePen,
+      primary: true,
+      to: (id) => `/care-recipients/${id}/care-plan/edit`,
+    },
+    { label: 'Print', icon: Printer, print: true },
   ],
   medications: [
-    { label: 'View Care Plan', icon: ClipboardList },
-    { label: 'Add Medication', icon: Plus, primary: true },
+    { label: 'View Care Plan', icon: ClipboardList, to: (id) => `/care-recipients/${id}/care-plan` },
+    { label: 'Add Medication', icon: Plus, primary: true, to: (id) => `/care-recipients/${id}/medications/new` },
   ],
   health: [
+    // Export is left to the backend.
     { label: 'Export', icon: Download },
-    { label: 'Add Health Event', icon: Plus, primary: true },
+    { label: 'Add Health Event', icon: Plus, primary: true, to: (id) => `/care-recipients/${id}/health/new` },
   ],
   caregivers: [
-    { label: 'Contact Family', icon: MessageSquare },
-    { label: 'Assign Caregiver', icon: Plus, primary: true },
+    { label: 'Contact Family', icon: MessageSquare, to: (id) => `/care-recipients/${id}/family?contact=1` },
+    { label: 'Assign Caregiver', icon: Plus, primary: true, to: (id) => `/care-recipients/${id}/caregivers/assign` },
   ],
   documents: [{ label: 'Upload Document', icon: Upload, primary: true }],
   billing: [

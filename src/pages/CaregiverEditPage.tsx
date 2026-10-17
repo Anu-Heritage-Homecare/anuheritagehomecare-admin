@@ -41,6 +41,7 @@ import { Field } from '@/components/ui/Field'
 import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { cn } from '@/lib/cn'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 export function CaregiverEditPage() {
   const { caregiverId } = useParams()
@@ -304,7 +305,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
             </Field>
             <Field label="Gender">
               {(p) => (
-                <select
+                <SelectBox
                   {...p}
                   className={fieldControl}
                   value={gender}
@@ -314,7 +315,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                   <option value="Female">Female</option>
                   <option value="Male">Male</option>
                   <option value="Non-binary">Non-binary</option>
-                </select>
+                </SelectBox>
               )}
             </Field>
           </div>
@@ -408,7 +409,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
           </Field>
           <Field label="Role">
             {(p) => (
-              <select
+              <SelectBox
                 {...p}
                 className={fieldControl}
                 value={values.title}
@@ -417,12 +418,12 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                 {titles.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
-              </select>
+              </SelectBox>
             )}
           </Field>
           <Field label="Employment Type">
             {(p) => (
-              <select
+              <SelectBox
                 {...p}
                 className={fieldControl}
                 value={values.employment}
@@ -431,7 +432,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                 {employmentTypes.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
-              </select>
+              </SelectBox>
             )}
           </Field>
           <Field label="Hourly Rate" error={show('hourlyRate')}>
@@ -455,7 +456,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
           </Field>
           <Field label="Branch">
             {(p) => (
-              <select
+              <SelectBox
                 {...p}
                 className={fieldControl}
                 value={values.branch}
@@ -464,12 +465,12 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                 {branches.map((b) => (
                   <option key={b}>{b}</option>
                 ))}
-              </select>
+              </SelectBox>
             )}
           </Field>
           <Field label="Supervisor">
             {(p) => (
-              <select
+              <SelectBox
                 {...p}
                 className={fieldControl}
                 value={values.supervisor}
@@ -486,7 +487,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                 {supervisorOptions.map((name) => (
                   <option key={name}>{name}</option>
                 ))}
-              </select>
+              </SelectBox>
             )}
           </Field>
           <Field label="Start Date" error={show('hiredAt')}>
@@ -577,7 +578,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
           </Field>
           <Field label="Relationship">
             {(p) => (
-              <select
+              <SelectBox
                 {...p}
                 className={fieldControl}
                 value={values.emergencyRelationship}
@@ -592,7 +593,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
                 {relationships.map((r) => (
                   <option key={r}>{r}</option>
                 ))}
-              </select>
+              </SelectBox>
             )}
           </Field>
           <Field label="Email">
@@ -1311,7 +1312,7 @@ function Availability({
         </Field>
         <Field label="Preferred Shift">
           {(p) => (
-            <select
+            <SelectBox
               {...p}
               className={fieldControl}
               value={values.preferredShift}
@@ -1320,7 +1321,7 @@ function Availability({
               {shifts.map((s) => (
                 <option key={s}>{s}</option>
               ))}
-            </select>
+            </SelectBox>
           )}
         </Field>
       </div>

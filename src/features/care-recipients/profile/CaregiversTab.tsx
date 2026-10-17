@@ -107,7 +107,7 @@ export function CaregiversTab() {
         ))}
       </div>
 
-      <CareTeamCards team={record.team} />
+      <CareTeamCards team={record.team} recipientId={profile.id} />
       <ScheduleCoverage shifts={record.shifts} weekdays={record.weekdays} />
       <AssignmentHistory history={record.history} />
     </div>

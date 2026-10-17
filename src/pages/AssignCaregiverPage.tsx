@@ -40,6 +40,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { PriorityBadge } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/cn'
 import { formatMiles, travelMiles } from '@/features/monitoring/locations-data'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 /* --------------------------------- helpers --------------------------------- */
 
@@ -420,7 +421,7 @@ function ChipSelect({
       )}
     >
       <span className="shrink-0">{label}:&nbsp;</span>
-      <select
+      <SelectBox
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn(
@@ -434,7 +435,7 @@ function ChipSelect({
             {o.label}
           </option>
         ))}
-      </select>
+      </SelectBox>
       {boxed && (
         <ChevronDown
           className="text-ink-muted pointer-events-none absolute right-2.5 size-4"

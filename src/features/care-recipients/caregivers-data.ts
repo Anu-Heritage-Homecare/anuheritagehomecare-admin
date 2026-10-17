@@ -1,5 +1,8 @@
 import { coordinatorFor, recipients } from './data'
-import { staffByName } from '@/features/caregivers/staff'
+import { staffByName, staffMembers } from '@/features/caregivers/staff'
+import type { StaffMember } from '@/features/caregivers/staff'
+import { SIGNED_IN } from '@/lib/session'
+import { TODAY } from '@/lib/today'
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -314,6 +317,100 @@ export function getCaregiverRecord(
   recipientId: string,
 ): CaregiverRecord | undefined {
   return records[recipientId] ?? synthesise(recipientId)
+}
+
+/* -------------------------------- reassign -------------------------------- */
+
+/**
+ * Who can take over a team member's place: active staff not already on this
+ * recipient's team, coordinators for the coordinator seat and caregivers for
+ * every other one.
+ */
+export function replacementsFor(recipientId: string, member: Pick<TeamMember, 'role'>): StaffMember[] {
+  const onTeam = new Set(getCaregiverRecord(recipientId)?.team.map((m) => m.name) ?? [])
+  const wantCoordinator = member.role === 'Care Coordinator'
+  return staffMembers.filter(
+    (s) =>
+      s.status === 'active' &&
+      !onTeam.has(s.name) &&
+      /coordinator/i.test(s.title) === wantCoordinator,
+  )
+}
+
+/**
+ * Puts someone else in a team member's seat — same role, same primary flag —
+ * and records both halves in the assignment history. Moving the primary seat
+ * also moves the caregiver named on the directory row. Held in memory.
+ */
+export function reassignTeamMember(
+  recipientId: string,
+  memberId: string,
+  replacementName: string,
+  reason: string,
+): void {
+  const record = getCaregiverRecord(recipientId)
+  const old = record?.team.find((m) => m.id === memberId)
+  if (!record || !old) return
+  const stamp = Date.now().toString(36)
+  const replacement = teamMember(`${memberId}-${stamp}`, replacementName, old.role, Boolean(old.primary))
+  const date = new Date(`${TODAY}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  records[recipientId] = {
+    ...record,
+    team: record.team.map((m) => (m.id === memberId ? replacement : m)),
+    history: [
+      { id: `ah-${stamp}-in`, dateIso: TODAY, date, action: 'assigned', caregiver: replacementName, reason: `Replaces ${old.name} as ${old.role}. ${reason}`, by: SIGNED_IN },
+      { id: `ah-${stamp}-out`, dateIso: TODAY, date, action: 'removed', caregiver: old.name, reason, by: SIGNED_IN },
+      ...record.history,
+    ],
+  }
+  if (old.primary) {
+    const row = recipients.find((r) => r.id === recipientId)
+    if (row) row.caregiver = replacementName
+  }
+}
+
+/**
+ * Seats Assign Caregiver can fill. Primary and Care Coordinator are single
+ * seats, offered only while empty; the supporting roles can be held by
+ * several people.
+ */
+export function openRoles(recipientId: string): CaregiverRole[] {
+  const team = getCaregiverRecord(recipientId)?.team ?? []
+  const has = (role: CaregiverRole) => team.some((m) => m.role === role)
+  const roles: CaregiverRole[] = []
+  if (!has('Primary Caregiver')) roles.push('Primary Caregiver')
+  roles.push('Backup Caregiver', 'Clinical Nurse', 'Relief Caregiver')
+  if (!has('Care Coordinator')) roles.push('Care Coordinator')
+  return roles
+}
+
+/** Adds someone to the team in a new seat and records it in the history. */
+export function addTeamMember(recipientId: string, name: string, role: CaregiverRole, reason: string): void {
+  const record = getCaregiverRecord(recipientId)
+  if (!record) return
+  const stamp = Date.now().toString(36)
+  const primary = role === 'Primary Caregiver'
+  const date = new Date(`${TODAY}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  records[recipientId] = {
+    ...record,
+    team: [...record.team, teamMember(`tm-${stamp}`, name, role, primary)],
+    history: [
+      { id: `ah-${stamp}`, dateIso: TODAY, date, action: 'assigned', caregiver: name, reason: `Added as ${role}. ${reason}`, by: SIGNED_IN },
+      ...record.history,
+    ],
+  }
+  if (primary) {
+    const row = recipients.find((r) => r.id === recipientId)
+    if (row) row.caregiver = name
+  }
 }
 
 /** Non-staff who appear as authors elsewhere in the record. */

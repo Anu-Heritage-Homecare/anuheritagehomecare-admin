@@ -134,7 +134,7 @@ export function VisitsTab() {
       />
 
       <section aria-label="Visit history" className="card overflow-hidden">
-        <VisitTable rows={pageRows} />
+        <VisitTable rows={pageRows} recipientId={profile.id} />
         <Pagination
           page={safePage}
           pageCount={pageCount}

@@ -4,8 +4,10 @@ import { recipients } from '@/features/care-recipients/data'
 import { SIGNED_IN } from '@/lib/session'
 import { TODAY } from '@/lib/today'
 import { assignableNames } from './data'
+import { groupLabel, membersOfGroup } from './groups'
 import { applyTemplate } from './templates'
 import type { TaskTemplate } from './templates'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 /**
  * Raising a task from a template.
@@ -24,9 +26,10 @@ export function UseTemplateDialog({
   onClose: () => void
   onApplied: (taskId: string) => void
 }) {
-  const [assignee, setAssignee] = useState(
-    template.suggestedAssignee ?? SIGNED_IN,
-  )
+  // The template names a group; raising a task has to land on one person, so
+  // the list is that group and the first of them is offered.
+  const inGroup = membersOfGroup(template.assignedTo).map((m) => m.name)
+  const [assignee, setAssignee] = useState(inGroup[0] ?? SIGNED_IN)
   const [recipientId, setRecipientId] = useState('')
   const [due, setDue] = useState(TODAY)
 
@@ -81,21 +84,38 @@ export function UseTemplateDialog({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor={assigneeId} className="text-ink text-sm font-medium">
+            <label
+              htmlFor={assigneeId}
+              className="text-ink text-sm font-medium"
+            >
               Assign to
             </label>
-            <select
+            <SelectBox
               id={assigneeId}
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
               className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
             >
-              {assignableNames().map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              <optgroup label={groupLabel(template.assignedTo)}>
+                {inGroup.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </optgroup>
+              {/* Not a wall: the group is who it is normally for, and a
+                  coordinator covering a gap still has to be able to put it on
+                  somebody else. */}
+              <optgroup label="Anyone else">
+                {assignableNames()
+                  .filter((n) => !inGroup.includes(n))
+                  .map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+              </optgroup>
+            </SelectBox>
           </div>
           <div>
             <label htmlFor={dueId} className="text-ink text-sm font-medium">
@@ -113,9 +133,10 @@ export function UseTemplateDialog({
 
         <div>
           <label htmlFor={clientId} className="text-ink text-sm font-medium">
-            Client <span className="text-ink-subtle font-normal">(optional)</span>
+            Client{' '}
+            <span className="text-ink-subtle font-normal">(optional)</span>
           </label>
-          <select
+          <SelectBox
             id={clientId}
             value={recipientId}
             onChange={(e) => setRecipientId(e.target.value)}
@@ -127,12 +148,12 @@ export function UseTemplateDialog({
                 {r.name}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </div>
 
         <p className="text-ink-subtle text-xs">
-          Raises one task now, filed by {SIGNED_IN}. Using a template again later
-          raises another — nothing repeats on its own.
+          Raises one task now, filed by {SIGNED_IN}. Using a template again
+          later raises another — nothing repeats on its own.
         </p>
 
         <div className="flex flex-wrap justify-end gap-2">

@@ -83,9 +83,15 @@ export function RecipientStatusBadge({ status }: { status: RecipientStatus }) {
 
 /* -------------------------------- severity -------------------------------- */
 
+/*
+ * Red, orange, amber — the design's three, and three steps a reader can tell
+ * apart at a glance. High used to be a second red, which made a high alert and
+ * a critical one the same colour of urgent at the size these pills are drawn.
+ * Each pair clears 4.5:1 on its own fill.
+ */
 const severityStyles: Record<Severity, string> = {
   critical: 'bg-red-100 text-red-700',
-  high: 'bg-red-50 text-red-600',
+  high: 'bg-orange-100 text-orange-800',
   medium: 'bg-amber-50 text-amber-700',
 }
 
@@ -99,13 +105,19 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
 
 /* -------------------------------- priority -------------------------------- */
 
-const priorityTone: Record<Priority, Tone> = {
-  critical: 'red',
-  urgent: 'red',
-  high: 'rose',
-  medium: 'amber',
-  normal: 'slate',
-  low: 'blue',
+/*
+ * Priority's own ramp rather than the shared tones: red, amber, yellow, grey,
+ * blue reads as a ladder, where the old rose-for-high sat so close to red that
+ * High and Critical were the same shout at pill size. Each pair clears 4.5:1
+ * on its own fill.
+ */
+const priorityStyles: Record<Priority, string> = {
+  critical: 'bg-red-100 text-red-700',
+  urgent: 'bg-red-100 text-red-700',
+  high: 'bg-amber-100 text-amber-800',
+  medium: 'bg-amber-50 text-amber-700',
+  normal: 'bg-slate-100 text-slate-600',
+  low: 'bg-blue-50 text-blue-700',
 }
 
 /** Pill form — used in dense directory tables. */
@@ -118,7 +130,7 @@ export function PriorityBadge({
 }) {
   return (
     <span
-      className={cn(square ? squareBase : base, 'capitalize', tonePill[priorityTone[priority]])}
+      className={cn(square ? squareBase : base, 'capitalize', priorityStyles[priority])}
     >
       {priority}
     </span>

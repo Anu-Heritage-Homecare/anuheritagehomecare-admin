@@ -17,6 +17,16 @@ export interface Recipient {
   status: RecipientStatus
   priority: Priority
   lastVisit: string | null
+  /** Collected by the Add Care Recipient drawer; the fixtures predate it. */
+  intake?: RecipientIntake
+}
+
+export interface RecipientIntake {
+  dateOfBirth: string
+  gender: string
+  phone: string
+  address: string
+  emergencyContact: { name: string; relationship: string; phone: string }
 }
 
 export interface Summary {
@@ -210,3 +220,24 @@ export const triggers: Trigger[] = [
   { id: 'care-plan', label: 'Missing Care Plan', count: 3, tone: 'amber' },
   { id: 'overdue', label: 'Overdue Visit', count: 5, tone: 'slate' },
 ]
+
+/**
+ * Adds a recipient from the Add Care Recipient drawer. A placeholder for
+ * intake until there is a design and an API: held in memory for the session,
+ * entered as "New" with no visits yet. The headline counts above are a paged
+ * API's totals and are not moved by it.
+ */
+export function addRecipient(input: Omit<Recipient, 'id' | 'ref' | 'status' | 'lastVisit'>): Recipient {
+  const next =
+    Math.max(0, ...recipients.map((r) => Number(r.id.replace(/\D/g, '')) || 0)) + 1
+  const n = String(next).padStart(3, '0')
+  const recipient: Recipient = {
+    ...input,
+    id: `cr-${n}`,
+    ref: `#CR-${n}`,
+    status: 'new',
+    lastVisit: null,
+  }
+  recipients.unshift(recipient)
+  return recipient
+}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { Receipt } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import {
@@ -48,12 +48,12 @@ export function BillingTab() {
           {profile.name} has no invoices or payment details on file. Billing
           appears here once an account is set up.
         </p>
-        <button
-          type="button"
+        <Link
+          to={`/billing/invoices/new?account=acc-${profile.id}&from=${encodeURIComponent(`/care-recipients/${profile.id}/billing`)}`}
           className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
         >
           Create Invoice
-        </button>
+        </Link>
       </div>
     )
   }

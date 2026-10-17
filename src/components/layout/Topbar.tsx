@@ -8,7 +8,7 @@ interface TopbarProps {
 
 export function Topbar({ navOpen, onMenuClick }: TopbarProps) {
   return (
-    <header className="border-line bg-surface/85 sticky top-0 z-20 border-b backdrop-blur-md">
+    <header className="border-line bg-surface/85 sticky top-0 z-20 border-b backdrop-blur-md print:hidden">
       <div className="flex h-16 items-center gap-2 px-4 sm:gap-3 sm:px-6">
         <button
           type="button"

@@ -39,7 +39,7 @@ export function RecipientProfilePage() {
     <div className="space-y-4">
       <Link
         to="/care-recipients"
-        className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 text-sm font-medium"
+        className="text-ink-muted hover:text-ink inline-flex items-center gap-1.5 text-sm font-medium print:hidden"
       >
         <ArrowLeft className="size-4" strokeWidth={2} />
         Care Recipients

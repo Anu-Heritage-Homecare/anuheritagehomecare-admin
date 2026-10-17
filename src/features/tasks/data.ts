@@ -27,11 +27,17 @@ import type { BoardVisit } from '@/features/scheduling/board-data'
 import { historyVisits } from '@/features/monitoring/history-data'
 import { incidentsFiled } from '@/features/monitoring/incidents-data'
 import { incidentTypeLabels } from '@/features/care-recipients/notes-data'
-import { careRequests, daysWaiting } from '@/features/care-recipients/requests-data'
+import {
+  careRequests,
+  daysWaiting,
+} from '@/features/care-recipients/requests-data'
 import { recipients } from '@/features/care-recipients/data'
-import { credentialStates, staffMembers } from '@/features/caregivers/roster-data'
+import {
+  credentialStates,
+  staffMembers,
+} from '@/features/caregivers/roster-data'
 import { SIGNED_IN, SIGNED_IN_ROLE } from '@/lib/session'
-import { priorityOrder as priorityRankOrder } from './settings'
+import { priorityById, priorityOrder as priorityRankOrder } from './settings'
 import type { TaskCategory, TaskPriority } from './settings'
 
 export type TaskOrigin = 'worked-out' | 'written'
@@ -81,6 +87,10 @@ export interface TaskEvent {
   id: string
   /** ISO datetime, UTC. */
   at: string
+  /**
+   * A verb phrase, lower case, with `by` in front of it: the timeline reads
+   * "Mike Chen ticked off …", the way the design writes a line.
+   */
   text: string
   by: string
 }
@@ -97,6 +107,12 @@ export interface AgencyTask {
   recipientName: string | null
   /** ISO date. Null on a written task with no date on it. */
   due: string | null
+  /**
+   * "HH:MM", 24-hour, and only where somebody typed one. A worked-out row
+   * never has one: the records behind them carry a day, not an hour — a
+   * closed visit has no clock-out to owe the paperwork from.
+   */
+  dueTime?: string
   /**
    * What the row was read off, in words. Only on worked-out tasks — it is the
    * answer to "why am I being told this", and a written task's answer is
@@ -131,6 +147,7 @@ interface WrittenTask {
   assignee: string | null
   recipientId: string | null
   due: string | null
+  dueTime?: string
   createdBy: string
   /** ISO datetime, UTC. When it was written down. */
   createdAt: string
@@ -154,8 +171,9 @@ interface WrittenTask {
 const written: WrittenTask[] = [
   {
     id: 'wt-1',
+    dueTime: '10:00',
     title: 'Order incontinence supplies for the Johnson household',
-    category: 'supplies',
+    category: 'operations',
     priority: 'medium',
     assignee: 'Admin Support',
     recipientId: 'cr-001',
@@ -168,7 +186,11 @@ const written: WrittenTask[] = [
     estimateMinutes: 20,
     checklist: [
       { id: 'c1', label: 'Count what is left in the cupboard', done: true },
-      { id: 'c2', label: 'Confirm the new pack size with the supplier', done: true },
+      {
+        id: 'c2',
+        label: 'Confirm the new pack size with the supplier',
+        done: true,
+      },
       { id: 'c3', label: 'Place the order', done: false },
       { id: 'c4', label: 'Tell the family when it will arrive', done: false },
     ],
@@ -184,15 +206,43 @@ const written: WrittenTask[] = [
       {
         id: 'e1',
         at: `${addDays(TODAY, -1)}T09:00:00Z`,
-        text: 'Created and assigned to Admin Support',
+        text: 'created the task and assigned it to Admin Support',
         by: 'Mike Chen',
+      },
+      {
+        id: 'e2',
+        at: `${addDays(TODAY, -1)}T14:20:00Z`,
+        text: 'left a comment',
+        by: 'Sarah Williams',
+      },
+      {
+        id: 'e3',
+        at: `${addDays(TODAY, -1)}T14:22:00Z`,
+        text: 'ticked off “Count what is left in the cupboard”',
+        by: 'Sarah Williams',
+      },
+      {
+        id: 'e4',
+        at: `${TODAY}T08:40:00Z`,
+        text: 'ticked off “Confirm the new pack size with the supplier”',
+        by: 'Admin Support',
       },
     ],
   },
   {
     id: 'wt-2',
     title: 'Arrange the family meeting about overnight cover',
-    category: 'family',
+    checklist: [
+      {
+        id: 'c1',
+        label: 'Ask the family which evenings suit them',
+        done: true,
+      },
+      { id: 'c2', label: 'Check who is free on those nights', done: false },
+      { id: 'c3', label: 'Send the invitation with the agenda', done: false },
+      { id: 'c4', label: 'Write the outcome onto the care plan', done: false },
+    ],
+    category: 'planning',
     priority: 'high',
     assignee: 'Mike Chen',
     recipientId: 'cr-006',
@@ -200,10 +250,34 @@ const written: WrittenTask[] = [
     createdBy: SIGNED_IN,
     createdAt: `${addDays(TODAY, -2)}T11:20:00Z`,
     done: false,
+    activity: [
+      {
+        id: 'e1',
+        at: `${addDays(TODAY, -2)}T11:20:00Z`,
+        text: 'created the task and assigned it to Mike Chen',
+        by: SIGNED_IN,
+      },
+      {
+        id: 'e2',
+        at: `${addDays(TODAY, -1)}T09:35:00Z`,
+        text: 'ticked off “Ask the family which evenings suit them”',
+        by: 'Mike Chen',
+      },
+    ],
   },
   {
     id: 'wt-3',
     title: 'Chase the hoist service engineer',
+    checklist: [
+      { id: 'c1', label: 'Find the last service certificate', done: true },
+      { id: 'c2', label: 'Ring the engineer for a date', done: true },
+      { id: 'c3', label: 'Put the visit on the schedule', done: false },
+      {
+        id: 'c4',
+        label: 'File the new certificate against the equipment',
+        done: false,
+      },
+    ],
     category: 'admin',
     priority: 'high',
     assignee: 'Admin Support',
@@ -212,11 +286,37 @@ const written: WrittenTask[] = [
     createdBy: 'Dr. Jane Foster',
     createdAt: `${addDays(TODAY, -4)}T15:45:00Z`,
     done: false,
+    activity: [
+      {
+        id: 'e1',
+        at: `${addDays(TODAY, -4)}T15:45:00Z`,
+        text: 'created the task and assigned it to Admin Support',
+        by: 'Dr. Jane Foster',
+      },
+      {
+        id: 'e2',
+        at: `${addDays(TODAY, -3)}T10:10:00Z`,
+        text: 'ticked off “Find the last service certificate”',
+        by: 'Admin Support',
+      },
+      {
+        id: 'e3',
+        at: `${addDays(TODAY, -2)}T14:05:00Z`,
+        text: 'ticked off “Ring the engineer for a date”',
+        by: 'Admin Support',
+      },
+    ],
   },
   {
     id: 'wt-4',
     title: 'Book the quarterly manual handling refresher',
-    category: 'compliance',
+    checklist: [
+      { id: 'c1', label: 'List who is due a refresher', done: true },
+      { id: 'c2', label: 'Pick a date the branch can cover', done: false },
+      { id: 'c3', label: 'Book the trainer', done: false },
+      { id: 'c4', label: 'Tell everybody who is on it', done: false },
+    ],
+    category: 'training',
     priority: 'medium',
     assignee: 'HR Team',
     recipientId: null,
@@ -224,10 +324,33 @@ const written: WrittenTask[] = [
     createdBy: SIGNED_IN,
     createdAt: `${addDays(TODAY, -3)}T08:30:00Z`,
     done: false,
+    activity: [
+      {
+        id: 'e1',
+        at: `${addDays(TODAY, -3)}T08:30:00Z`,
+        text: 'created the task and assigned it to HR Team',
+        by: SIGNED_IN,
+      },
+      {
+        id: 'e2',
+        at: `${addDays(TODAY, -2)}T16:40:00Z`,
+        text: 'ticked off “List who is due a refresher”',
+        by: 'HR Team',
+      },
+    ],
   },
   {
     id: 'wt-5',
     title: 'Write up the July rota review for the branch meeting',
+    checklist: [
+      {
+        id: 'c1',
+        label: 'Pull the hours worked against contract',
+        done: false,
+      },
+      { id: 'c2', label: 'Note the weeks that went uncovered', done: false },
+      { id: 'c3', label: 'Draft the summary', done: false },
+    ],
     category: 'admin',
     priority: 'low',
     assignee: 'Amara Nwosu',
@@ -236,11 +359,24 @@ const written: WrittenTask[] = [
     createdBy: 'Amara Nwosu',
     createdAt: `${addDays(TODAY, -6)}T16:10:00Z`,
     done: false,
+    activity: [
+      {
+        id: 'e1',
+        at: `${addDays(TODAY, -6)}T16:10:00Z`,
+        text: 'created the task and assigned it to Amara Nwosu',
+        by: 'Amara Nwosu',
+      },
+    ],
   },
   {
     id: 'wt-6',
     title: 'Confirm the new key safe code with the family',
-    category: 'family',
+    checklist: [
+      { id: 'c1', label: 'Ring the family for the new code', done: true },
+      { id: 'c2', label: 'Update the code on the care record', done: true },
+      { id: 'c3', label: 'Tell the caregivers on the rota', done: true },
+    ],
+    category: 'planning',
     priority: 'medium',
     assignee: 'Lisa Thompson',
     recipientId: 'cr-005',
@@ -248,6 +384,38 @@ const written: WrittenTask[] = [
     createdBy: 'Dr. Jane Foster',
     createdAt: `${addDays(TODAY, -5)}T10:05:00Z`,
     done: true,
+    activity: [
+      {
+        id: 'e1',
+        at: `${addDays(TODAY, -5)}T10:05:00Z`,
+        text: 'created the task and assigned it to Lisa Thompson',
+        by: 'Dr. Jane Foster',
+      },
+      {
+        id: 'e2',
+        at: `${addDays(TODAY, -4)}T09:15:00Z`,
+        text: 'ticked off “Ring the family for the new code”',
+        by: 'Lisa Thompson',
+      },
+      {
+        id: 'e3',
+        at: `${addDays(TODAY, -4)}T09:20:00Z`,
+        text: 'ticked off “Update the code on the care record”',
+        by: 'Lisa Thompson',
+      },
+      {
+        id: 'e4',
+        at: `${addDays(TODAY, -3)}T11:50:00Z`,
+        text: 'ticked off “Tell the caregivers on the rota”',
+        by: 'Lisa Thompson',
+      },
+      {
+        id: 'e5',
+        at: `${addDays(TODAY, -3)}T11:52:00Z`,
+        text: 'marked it complete',
+        by: 'Lisa Thompson',
+      },
+    ],
   },
 ]
 
@@ -272,6 +440,8 @@ export interface NewTask {
   assignee: string | null
   recipientId: string | null
   due: string | null
+  /** "HH:MM", where the person typing wanted an hour as well as a day. */
+  dueTime?: string | null
   estimateMinutes?: number | null
 }
 
@@ -282,6 +452,7 @@ export function createTask(task: NewTask): string {
     ...task,
     id,
     description: task.description?.trim() === '' ? undefined : task.description,
+    dueTime: task.dueTime ?? undefined,
     estimateMinutes: task.estimateMinutes ?? undefined,
     checklist: (task.items ?? []).map((label, index) => ({
       id: `c${index + 1}`,
@@ -293,7 +464,12 @@ export function createTask(task: NewTask): string {
     done: false,
     activity: [],
   }
-  record(entry, `Created and assigned to ${task.assignee ?? 'nobody'}`)
+  record(
+    entry,
+    task.assignee
+      ? `created the task and assigned it to ${task.assignee}`
+      : 'created the task',
+  )
   written.unshift(entry)
   emit()
   return id
@@ -304,7 +480,7 @@ export function setTaskDone(id: string, done: boolean): void {
   const task = find(id)
   if (!task || task.done === done) return
   task.done = done
-  record(task, done ? 'Marked complete' : 'Reopened')
+  record(task, done ? 'marked it complete' : 'reopened it')
   emit()
 }
 
@@ -352,6 +528,7 @@ export interface TaskEdit {
   assignee: string | null
   recipientId: string | null
   due: string | null
+  dueTime: string | null
   estimate: number | null
 }
 
@@ -367,11 +544,31 @@ export function updateTask(id: string, edit: TaskEdit): void {
     assignee: edit.assignee,
     recipientId: edit.recipientId,
     due: edit.due,
+    dueTime: edit.dueTime ?? undefined,
     estimateMinutes: edit.estimate ?? undefined,
   })
   // Reassignment is the edit worth its own line: everything else is a detail,
   // but somebody else's name appearing on a task is a handover.
-  record(task, moved ? `Reassigned to ${edit.assignee ?? 'nobody'}` : 'Edited')
+  record(
+    task,
+    moved ? `reassigned it to ${edit.assignee ?? 'nobody'}` : 'edited the task',
+  )
+  emit()
+}
+
+/**
+ * One field, on purpose.
+ *
+ * The Tasks screen's bulk assign hands several tasks to one person; it has no
+ * business rewriting anything else about them, which `updateTask` would since
+ * it takes the whole form. Worked-out rows never reach here — their assignee
+ * comes off the record they were read from.
+ */
+export function reassignTask(id: string, assignee: string | null): void {
+  const task = find(id)
+  if (!task || task.assignee === assignee) return
+  task.assignee = assignee
+  record(task, `reassigned it to ${assignee ?? 'nobody'}`)
   emit()
 }
 
@@ -382,14 +579,31 @@ export function deleteTask(id: string): void {
   emit()
 }
 
+/**
+ * Notes left on a worked-out row, kept beside the derivation.
+ *
+ * A worked-out task is rebuilt from the records every time the list is drawn,
+ * so there is nothing on it to write to. Its id is stable, though — it is made
+ * of the visit, the credential or the request behind it — so a note keyed by
+ * that id survives every redraw, and goes when the row itself goes.
+ */
+const notesOnDerived = new Map<string, TaskComment[]>()
+
 export function addComment(id: string, body: string): void {
+  if (body.trim() === '') return
+  const entry: TaskComment = {
+    id: nextId('k'),
+    at: nowStamp(),
+    author: SIGNED_IN,
+    body: body.trim(),
+  }
   const task = find(id)
-  if (!task || body.trim() === '') return
-  task.comments = [
-    ...(task.comments ?? []),
-    { id: nextId('k'), at: nowStamp(), author: SIGNED_IN, body: body.trim() },
-  ]
-  record(task, 'Commented')
+  if (task) {
+    task.comments = [...(task.comments ?? []), entry]
+    record(task, 'left a comment')
+  } else {
+    notesOnDerived.set(id, [...(notesOnDerived.get(id) ?? []), entry])
+  }
   emit()
 }
 
@@ -403,12 +617,19 @@ export function addChecklistItem(id: string, label: string): void {
   emit()
 }
 
-export function setChecklistItem(id: string, itemId: string, done: boolean): void {
+export function setChecklistItem(
+  id: string,
+  itemId: string,
+  done: boolean,
+): void {
   const task = find(id)
   if (!task) return
-  task.checklist = (task.checklist ?? []).map((item) =>
-    item.id === itemId ? { ...item, done } : item,
+  const item = (task.checklist ?? []).find((c) => c.id === itemId)
+  if (!item || item.done === done) return
+  task.checklist = (task.checklist ?? []).map((c) =>
+    c.id === itemId ? { ...c, done } : c,
   )
+  record(task, `${done ? 'ticked off' : 'unticked'} “${item.label}”`)
   emit()
 }
 
@@ -438,7 +659,8 @@ function recipientNameOf(id: string | null): string | null {
 
 function daysBetween(from: string, to: string): number {
   return Math.round(
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+      86_400_000,
   )
 }
 
@@ -462,7 +684,7 @@ function derivedTasks(today = TODAY): AgencyTask[] {
       id: `wo-writeup-${visit.id}`,
       origin: 'worked-out',
       title: `Write up the ${visit.type.toLowerCase()} visit`,
-      category: 'paperwork',
+      category: 'admin',
       priority: age > WRITE_UP_GRACE_DAYS ? 'high' : 'medium',
       assignee: visit.caregiverName,
       recipientId: visit.recipientId,
@@ -486,14 +708,23 @@ function derivedTasks(today = TODAY): AgencyTask[] {
     )) {
       if (!credential.expiresAt) continue
       const expired = state === 'expired'
-      if (!expired && (daysRemaining === null || daysRemaining > RENEWAL_WINDOW_DAYS))
+      if (
+        !expired &&
+        (daysRemaining === null || daysRemaining > RENEWAL_WINDOW_DAYS)
+      )
         continue
       tasks.push({
         id: `wo-cred-${member.id}-${credential.id}`,
         origin: 'worked-out',
-        title: `${expired ? 'Renew the lapsed' : 'Renew'} ${credential.name.toLowerCase()} for ${member.name}`,
-        category: 'compliance',
-        priority: expired ? 'critical' : daysRemaining! <= 14 ? 'high' : 'medium',
+        // The credential's own name, as it is written on the record: lower-casing
+        // it turned "CPR / First Aid" into "cpr / first aid".
+        title: `${expired ? 'Renew the lapsed' : 'Renew'} ${credential.name} for ${member.name}`,
+        category: 'training',
+        priority: expired
+          ? 'critical'
+          : daysRemaining! <= 14
+            ? 'high'
+            : 'medium',
         // Not the caregiver: chasing a renewal is the office's job, and putting
         // it on the person whose licence lapsed is how it stays lapsed.
         assignee: 'HR Team',
@@ -517,7 +748,7 @@ function derivedTasks(today = TODAY): AgencyTask[] {
       id: `wo-incident-${incident.id}`,
       origin: 'worked-out',
       title: `Follow up the ${incidentTypeLabels[incident.type].toLowerCase()} written up for ${incident.recipientName}`,
-      category: 'incident',
+      category: 'safety',
       priority:
         incident.severity === 'critical' || incident.severity === 'high'
           ? 'high'
@@ -541,7 +772,7 @@ function derivedTasks(today = TODAY): AgencyTask[] {
       id: `wo-request-${request.id}`,
       origin: 'worked-out',
       title: `Decide on ${request.patient.name}'s care request`,
-      category: 'intake',
+      category: 'operations',
       priority: waiting > REQUEST_GRACE_DAYS ? 'high' : 'medium',
       // The coordinator is a name on the request, not a record — the field
       // holds the string the family's request was routed to.
@@ -558,6 +789,43 @@ function derivedTasks(today = TODAY): AgencyTask[] {
   return tasks
 }
 
+/* ----------------------------------- SLA ---------------------------------- */
+
+export interface SlaState {
+  /** The target for this task's priority, in hours. */
+  targetHours: number
+  /** Hours since it was written, off the same clock as everything else. */
+  hoursSince: number
+  pastTarget: boolean
+  /** Past the target by enough that the office is meant to pick it up. */
+  escalated: boolean
+}
+
+/**
+ * How a task stands against its priority's target.
+ *
+ * Only a written task has one: it carries the moment somebody wrote it, and
+ * the target runs from there. A worked-out row was never written — it is read
+ * off a record every time the list is drawn — so there is no moment to measure
+ * from and this returns null rather than inventing one. Done tasks are past
+ * caring.
+ */
+export function slaFor(task: AgencyTask): SlaState | null {
+  if (task.done || !task.createdAt) return null
+  const level = priorityById(task.priority)
+  if (!level) return null
+
+  const written = new Date(task.createdAt).getTime()
+  const now = new Date(`${TODAY}T${NOW}:00Z`).getTime()
+  const hoursSince = Math.max(0, (now - written) / 3_600_000)
+  const pastTarget = hoursSince > level.slaHours
+  const escalated =
+    level.escalateAfterHours !== null &&
+    hoursSince > level.slaHours + level.escalateAfterHours
+
+  return { targetHours: level.slaHours, hoursSince, pastTarget, escalated }
+}
+
 /* --------------------------------- reading -------------------------------- */
 
 /** Built off the one ordering, so a rank can never disagree with a filter. */
@@ -572,7 +840,10 @@ const priorityRank = Object.fromEntries(
  */
 export function allTasks(today = TODAY): AgencyTask[] {
   const rows: AgencyTask[] = [
-    ...derivedTasks(today),
+    ...derivedTasks(today).map((task) => ({
+      ...task,
+      comments: notesOnDerived.get(task.id) ?? [],
+    })),
     ...written.map((task) => ({
       ...task,
       origin: 'written' as const,
@@ -651,7 +922,10 @@ export function assignableNames(): string[] {
 }
 
 /** One task by id, worked-out or written. Undefined once a written one is deleted. */
-export function taskById(id: string | undefined, today = TODAY): AgencyTask | undefined {
+export function taskById(
+  id: string | undefined,
+  today = TODAY,
+): AgencyTask | undefined {
   if (!id) return undefined
   return allTasks(today).find((t) => t.id === id)
 }
@@ -662,15 +936,31 @@ export function taskById(id: string | undefined, today = TODAY): AgencyTask | un
  * somebody has to maintain by hand goes stale the day after it is written.
  */
 export function relatedTasks(task: AgencyTask, today = TODAY): AgencyTask[] {
-  return allTasks(today)
+  const open = allTasks(today)
     .filter(
       (other) =>
         other.id !== task.id &&
         !other.done &&
-        ((task.recipientId !== null && other.recipientId === task.recipientId) ||
+        ((task.recipientId !== null &&
+          other.recipientId === task.recipientId) ||
           (task.assignee !== null && other.assignee === task.assignee)),
     )
-    .slice(0, 5)
+    // Oldest date first: what is late matters more than what is coming, and a
+    // task with no date on it has nothing to be urgent about.
+    .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999'))
+
+  // One per title. A client seen twice a day owes a write-up per visit, so the
+  // same line comes back four times and crowds out everything else that is
+  // open; the oldest of each kind stands for the rest.
+  const seen = new Set<string>()
+  const spread: AgencyTask[] = []
+  for (const other of open) {
+    if (seen.has(other.title)) continue
+    seen.add(other.title)
+    spread.push(other)
+    if (spread.length === 4) break
+  }
+  return spread
 }
 
 /**
@@ -680,7 +970,29 @@ export function relatedTasks(task: AgencyTask, today = TODAY): AgencyTask[] {
  * say "280 generated a month", but nothing generates anything here — see the
  * note at the top of `templates.ts`.
  */
-export function tasksFromTemplate(templateId: string, today = TODAY): AgencyTask[] {
+/**
+ * Relabel every written task under one category with another.
+ *
+ * Deleting a category on the settings screen has to say where its tasks go —
+ * leaving them pointing at an id nobody recognises would label them with the
+ * id itself. Worked-out rows are not touched, and cannot be: they are read off
+ * records, and the categories they land in are the ones marked built in, which
+ * the settings screen will not delete.
+ */
+export function recategoriseTasks(from: TaskCategory, to: TaskCategory): void {
+  let moved = false
+  for (const task of written) {
+    if (task.category !== from) continue
+    task.category = to
+    moved = true
+  }
+  if (moved) emit()
+}
+
+export function tasksFromTemplate(
+  templateId: string,
+  today = TODAY,
+): AgencyTask[] {
   return allTasks(today).filter((t) => t.fromTemplate === templateId)
 }
 

@@ -1,17 +1,26 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Brand — CareProfs indigo */
-  --color-brand-50: oklch(0.97 0.014 285);
-  --color-brand-100: oklch(0.94 0.03 285);
-  --color-brand-200: oklch(0.89 0.055 285);
-  --color-brand-300: oklch(0.81 0.09 285);
-  --color-brand-400: oklch(0.7 0.14 285);
-  --color-brand-500: oklch(0.62 0.19 285);
-  --color-brand-600: oklch(0.55 0.23 285);
-  --color-brand-700: oklch(0.49 0.22 285);
-  --color-brand-800: oklch(0.42 0.19 285);
-  --color-brand-900: oklch(0.36 0.15 285);
+  /*
+   * Brand — CareProfs blue. The design's #3E64FF is `brand-600`, written in
+   * OKLCH like the rest of the ramp: oklch(0.5731 0.2334 267.56) is that hex
+   * exactly. Every step shares the hue; lightness and chroma make the ladder.
+   *
+   * Contrast against white, so the ramp can be used without checking again:
+   * 600 is 4.70:1 (AA for body text on a filled button), 700 is 6.27:1 (links
+   * and the wordmark), and 700 on a 50 fill — the active nav chip — is 5.73:1.
+   * 500 and lighter are fills and borders, never text on white.
+   */
+  --color-brand-50: oklch(0.97 0.016 267.56);
+  --color-brand-100: oklch(0.945 0.035 267.56);
+  --color-brand-200: oklch(0.9 0.065 267.56);
+  --color-brand-300: oklch(0.825 0.105 267.56);
+  --color-brand-400: oklch(0.72 0.16 267.56);
+  --color-brand-500: oklch(0.645 0.205 267.56);
+  --color-brand-600: oklch(0.5731 0.2334 267.56);
+  --color-brand-700: oklch(0.505 0.215 267.56);
+  --color-brand-800: oklch(0.435 0.185 267.56);
+  --color-brand-900: oklch(0.375 0.15 267.56);
 
   /* Surfaces */
   --color-surface: oklch(1 0 0);

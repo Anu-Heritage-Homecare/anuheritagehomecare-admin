@@ -1,15 +1,15 @@
 import { useId, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
-import {
-  assignableNames,
-  priorityLabel,
-  priorityOrder,
-  offeredCategories,
-} from './data'
+import { priorityLabel, priorityOrder, offeredCategories } from './data'
 import type { TaskCategory, TaskPriority } from './data'
+import { groupById, membersOfGroup, staffGroups } from './groups'
+import { frequencies } from './templates'
+import type { TemplateFrequency } from './templates'
+import type { StaffGroupId } from './groups'
 import { createTemplate, updateTemplate } from './templates'
 import type { TaskTemplate } from './templates'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 /**
  * Writing or changing a template.
@@ -34,8 +34,13 @@ export function TemplateDialog({
   const [priority, setPriority] = useState<TaskPriority>(
     template?.priority ?? 'medium',
   )
+  const [frequency, setFrequency] = useState<TemplateFrequency>(
+    template?.frequency ?? 'as-needed',
+  )
   const [cadence, setCadence] = useState(template?.cadence ?? '')
-  const [assignee, setAssignee] = useState(template?.suggestedAssignee ?? '')
+  const [assignedTo, setAssignedTo] = useState<StaffGroupId>(
+    template?.assignedTo ?? 'all-caregivers',
+  )
   const [estimate, setEstimate] = useState(
     template ? String(template.estimateMinutes) : '',
   )
@@ -46,6 +51,7 @@ export function TemplateDialog({
   const descriptionId = useId()
   const categoryId = useId()
   const priorityId = useId()
+  const frequencyId = useId()
   const cadenceId = useId()
   const assigneeId = useId()
   const estimateId = useId()
@@ -60,8 +66,9 @@ export function TemplateDialog({
       description: description.trim(),
       category,
       priority,
-      cadence: cadence.trim() === '' ? 'No usual time' : cadence.trim(),
-      suggestedAssignee: assignee === '' ? null : assignee,
+      frequency,
+      cadence: cadence.trim(),
+      assignedTo,
       estimateMinutes: estimate === '' ? 0 : Number(estimate),
       items,
     }
@@ -93,7 +100,10 @@ export function TemplateDialog({
         </div>
 
         <div>
-          <label htmlFor={descriptionId} className="text-ink text-sm font-medium">
+          <label
+            htmlFor={descriptionId}
+            className="text-ink text-sm font-medium"
+          >
             What it is for
           </label>
           <textarea
@@ -125,7 +135,11 @@ export function TemplateDialog({
                   onClick={() => setItems(items.filter((_, i) => i !== index))}
                   className="text-ink-subtle hover:text-ink shrink-0"
                 >
-                  <X className="size-3.5" strokeWidth={2.4} aria-hidden="true" />
+                  <X
+                    className="size-3.5"
+                    strokeWidth={2.4}
+                    aria-hidden="true"
+                  />
                   <span className="sr-only">Remove step {index + 1}</span>
                 </button>
               </li>
@@ -157,7 +171,11 @@ export function TemplateDialog({
               disabled={draft.trim() === ''}
               className="border-line text-ink hover:bg-sunken inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Plus className="size-4 shrink-0" strokeWidth={2.2} aria-hidden="true" />
+              <Plus
+                className="size-4 shrink-0"
+                strokeWidth={2.2}
+                aria-hidden="true"
+              />
               Add
             </button>
           </div>
@@ -171,10 +189,13 @@ export function TemplateDialog({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor={categoryId} className="text-ink text-sm font-medium">
+            <label
+              htmlFor={categoryId}
+              className="text-ink text-sm font-medium"
+            >
               Category
             </label>
-            <select
+            <SelectBox
               id={categoryId}
               value={category}
               onChange={(e) => setCategory(e.target.value as TaskCategory)}
@@ -185,13 +206,16 @@ export function TemplateDialog({
                   {c.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
           <div>
-            <label htmlFor={priorityId} className="text-ink text-sm font-medium">
+            <label
+              htmlFor={priorityId}
+              className="text-ink text-sm font-medium"
+            >
               Priority
             </label>
-            <select
+            <SelectBox
               id={priorityId}
               value={priority}
               onChange={(e) => setPriority(e.target.value as TaskPriority)}
@@ -202,31 +226,43 @@ export function TemplateDialog({
                   {priorityLabel(p)}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor={assigneeId} className="text-ink text-sm font-medium">
-              Usually falls to
+            <label
+              htmlFor={assigneeId}
+              className="text-ink text-sm font-medium"
+            >
+              Assigned to
             </label>
-            <select
+            {/* A group, not a person: the design assigns a checklist to whoever
+                is on the round. Raising a task from it then picks one of
+                them. */}
+            <SelectBox
               id={assigneeId}
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
+              value={assignedTo}
+              onChange={(e) => setAssignedTo(e.target.value as StaffGroupId)}
               className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
             >
-              <option value="">Whoever is on the visit</option>
-              {assignableNames().map((n) => (
-                <option key={n} value={n}>
-                  {n}
+              {staffGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
+            <p className="text-ink-subtle mt-1 text-xs">
+              {groupById(assignedTo).rule} &mdash;{' '}
+              {membersOfGroup(assignedTo).length} on the roster today.
+            </p>
           </div>
           <div>
-            <label htmlFor={estimateId} className="text-ink text-sm font-medium">
+            <label
+              htmlFor={estimateId}
+              className="text-ink text-sm font-medium"
+            >
               Estimate
             </label>
             <input
@@ -245,24 +281,51 @@ export function TemplateDialog({
           </div>
         </div>
 
-        <div>
-          <label htmlFor={cadenceId} className="text-ink text-sm font-medium">
-            When it is usually done
-          </label>
-          <input
-            id={cadenceId}
-            type="text"
-            value={cadence}
-            onChange={(e) => setCadence(e.target.value)}
-            placeholder="Usually first thing, on the morning visit"
-            className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
-          />
-          {/* The field the design has as a schedule. It is a sentence for a
-              person, and the card says so wherever it appears. */}
-          <p className="text-ink-subtle mt-1 text-xs">
-            A note for whoever raises it — not a schedule. Nothing in this app
-            raises a task on its own.
-          </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label
+              htmlFor={frequencyId}
+              className="text-ink text-sm font-medium"
+            >
+              Schedule
+            </label>
+            <SelectBox
+              id={frequencyId}
+              value={frequency}
+              onChange={(e) =>
+                setFrequency(e.target.value as TemplateFrequency)
+              }
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            >
+              {frequencies.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </SelectBox>
+            {/* The pattern, so every daily checklist can be found at once. It
+                is not a timer: nothing in this app raises a task on its own. */}
+            <p className="text-ink-subtle mt-1 text-xs">
+              How often it comes round. Nothing raises it for you.
+            </p>
+          </div>
+          <div>
+            <label htmlFor={cadenceId} className="text-ink text-sm font-medium">
+              When, exactly{' '}
+              <span className="text-ink-subtle font-normal">(optional)</span>
+            </label>
+            <input
+              id={cadenceId}
+              type="text"
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value)}
+              placeholder="first thing, on the morning visit"
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            />
+            <p className="text-ink-subtle mt-1 text-xs">
+              A note for whoever raises it.
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">

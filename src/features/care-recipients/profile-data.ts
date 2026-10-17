@@ -226,6 +226,72 @@ function synthesise(r: Recipient): Detail {
   }
 }
 
+/* --------------------------------- edits ---------------------------------- */
+
+/** What the Edit Profile page changes beyond the directory row itself. */
+export interface ProfileEdits {
+  sex: string
+  personal: Pick<Personal, 'phone' | 'email' | 'address' | 'dateOfBirth' | 'languages'>
+  summary: Pick<
+    CareSummary,
+    'startDateIso' | 'startDate' | 'primaryDiagnosis' | 'secondaryDiagnosis' | 'coordinator' | 'emergencyContact'
+  >
+}
+
+const edits = new Map<string, ProfileEdits>()
+
+/**
+ * Saves the Edit Profile page. The directory fields are written onto the
+ * shared row, so the directory, the header and every tab agree; the rest is
+ * laid over the profile detail. Held in memory for the session.
+ */
+export function saveRecipientProfile(
+  id: string,
+  row: Pick<Recipient, 'name' | 'age' | 'condition' | 'careLevel' | 'priority'>,
+  profile: ProfileEdits,
+): void {
+  const base = recipients.find((r) => r.id === id)
+  if (!base) return
+  Object.assign(base, row)
+  edits.set(id, profile)
+}
+
+function formatLongDate(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+/** What an intake form entered beats what synthesise() would invent. */
+function withIntake(detail: Detail, base: Recipient): Detail {
+  const intake = base.intake
+  if (!intake) return detail
+  return {
+    ...detail,
+    sex: intake.gender,
+    personal: {
+      ...detail.personal,
+      phone: intake.phone || detail.personal.phone,
+      address: intake.address,
+      dateOfBirth: formatLongDate(intake.dateOfBirth),
+    },
+    summary: { ...detail.summary, emergencyContact: intake.emergencyContact },
+  }
+}
+
+function withEdits(detail: Detail, id: string): Detail {
+  const e = edits.get(id)
+  if (!e) return detail
+  return {
+    ...detail,
+    sex: e.sex,
+    personal: { ...detail.personal, ...e.personal },
+    summary: { ...detail.summary, ...e.summary },
+  }
+}
+
 /**
  * The Overview panels summarise the Visits and Medications tabs, so they read
  * from those modules rather than keeping a second hand-authored copy — the two
@@ -274,7 +340,7 @@ export function getRecipientProfile(id: string): RecipientProfile | undefined {
 
   return {
     ...base,
-    ...(details[id] ?? synthesise(base)),
+    ...withEdits(withIntake(details[id] ?? synthesise(base), base), id),
     recentVisits,
     medications,
     team,

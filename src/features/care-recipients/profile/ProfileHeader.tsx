@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { RecipientProfile } from '../profile-data'
 import type { TabAction } from './tabs'
 import { Avatar } from '@/components/ui/Avatar'
@@ -57,22 +58,35 @@ export function ProfileHeader({ profile, actions }: ProfileHeaderProps) {
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2 min-[420px]:flex-row">
-        {actions.map(({ label, icon: Icon, primary }) => (
-          <button
-            key={label}
-            type="button"
-            className={cn(
-              'inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors',
-              primary
-                ? 'bg-brand-600 hover:bg-brand-700 text-white'
-                : 'border-control text-ink hover:bg-sunken border',
-            )}
-          >
-            <Icon className="size-4" strokeWidth={1.9} />
-            {label}
-          </button>
-        ))}
+      <div className="flex shrink-0 flex-col gap-2 min-[420px]:flex-row print:hidden">
+        {actions.map(({ label, icon: Icon, primary, to, print }) => {
+          const className = cn(
+            'inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors',
+            primary
+              ? 'bg-brand-600 hover:bg-brand-700 text-white'
+              : 'border-control text-ink hover:bg-sunken border',
+          )
+          const body = (
+            <>
+              <Icon className="size-4" strokeWidth={1.9} />
+              {label}
+            </>
+          )
+          return to ? (
+            <Link key={label} to={to(profile.id)} className={className}>
+              {body}
+            </Link>
+          ) : (
+            <button
+              key={label}
+              type="button"
+              onClick={print ? () => window.print() : undefined}
+              className={className}
+            >
+              {body}
+            </button>
+          )
+        })}
       </div>
     </div>
   )

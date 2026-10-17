@@ -86,16 +86,29 @@ export const navItems: NavItem[] = [
     to: '/tasks',
     icon: SquareCheck,
     /*
-     * The list and the checklists behind it. A template is only ever raised by
-     * hand here, so it belongs beside the tasks rather than under settings.
+     * Templates are not listed here: the Tasks page opens them, from the header
+     * button and from Quick Operations, and a nav entry for a screen one click
+     * away only lengthens the rail.
      */
     children: [
       { label: 'All Tasks', to: '/tasks', end: true },
-      { label: 'Templates', to: '/tasks/templates' },
       { label: 'Task Settings', to: '/tasks/settings' },
     ],
   },
-  { label: 'Messages', to: '/messages', icon: MessageSquare },
+  {
+    label: 'Messages',
+    to: '/messages',
+    icon: MessageSquare,
+    /*
+     * Announcements are not here: they are a folder of the inbox, and the
+     * folder rail is where somebody working the inbox looks for them. Settings
+     * is, because it is a settings screen rather than a cut of the inbox.
+     */
+    children: [
+      { label: 'Inbox', to: '/messages', end: true },
+      { label: 'Message Settings', to: '/messages/settings' },
+    ],
+  },
   {
     label: 'Billing',
     to: '/billing',
@@ -107,8 +120,13 @@ export const navItems: NavItem[] = [
      */
     children: [
       { label: 'Overview', to: '/billing', end: true },
+      { label: 'Accounts', to: '/billing/accounts' },
+      { label: 'Invoices', to: '/billing/invoices' },
+      { label: 'Credits & Adjustments', to: '/billing/adjustments' },
+      { label: 'Financial Reports', to: '/billing/reports' },
       { label: 'Care Plans', to: '/billing/plans' },
       { label: 'Subscriptions', to: '/billing/subscriptions' },
+      { label: 'Billing Settings', to: '/billing/settings' },
     ],
   },
   { label: 'Reports', to: '/reports', icon: BarChart3 },

@@ -22,6 +22,7 @@ import type {
   FamilyMember,
 } from '../family-data'
 import { cn } from '@/lib/cn'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 /** Digits only — a `tel:` with spaces and a plus sign in it does not dial. */
 function telHref(phone: string): string {
@@ -286,7 +287,7 @@ function RecordAttempt({
       <div className="grid grid-cols-2 gap-2">
         <label className="text-ink-muted text-xs">
           Channel
-          <select
+          <SelectBox
             value={type}
             onChange={(e) => setType(e.target.value as CommunicationType)}
             className="border-line focus:border-brand-500 text-ink mt-1 h-10 w-full rounded-lg border px-2 text-sm"
@@ -296,11 +297,11 @@ function RecordAttempt({
                 {c}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </label>
         <label className="text-ink-muted text-xs">
           Outcome
-          <select
+          <SelectBox
             value={outcome}
             onChange={(e) => setOutcome(e.target.value as ContactOutcome)}
             className="border-line focus:border-brand-500 text-ink mt-1 h-10 w-full rounded-lg border px-2 text-sm"
@@ -310,7 +311,7 @@ function RecordAttempt({
                 {contactOutcomeLabels[o]}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </label>
       </div>
       <label className="text-ink-muted block text-xs">

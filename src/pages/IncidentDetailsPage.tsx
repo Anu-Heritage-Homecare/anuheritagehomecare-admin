@@ -33,6 +33,7 @@ import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { tonePill } from '@/lib/tone'
 import { cn } from '@/lib/cn'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 const tabs = [
   { slug: 'overview', label: 'Overview' },
@@ -1044,7 +1045,7 @@ function ResolutionForm({
               htmlFor="res-status"
               hint="Proposed vocabulary. This app stores no status on an incident — the rest of this screen says so, and this dropdown does not change it."
             >
-              <select
+              <SelectBox
                 id="res-status"
                 value={draft.status}
                 onChange={(e) => set('status', e.target.value as ResolutionStatus)}
@@ -1055,7 +1056,7 @@ function ResolutionForm({
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </Field>
 
             <Field

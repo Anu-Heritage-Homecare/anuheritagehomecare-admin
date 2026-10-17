@@ -1,4 +1,7 @@
+import { useNavigate } from 'react-router-dom'
 import { alerts } from './data'
+import type { Alert } from './data'
+import { TODAY } from '@/lib/today'
 import type { Severity } from '@/types'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { SeverityBadge } from '@/components/ui/StatusBadge'
@@ -11,6 +14,25 @@ const accent: Record<Severity, string> = {
 }
 
 export function CriticalAlerts() {
+  const navigate = useNavigate()
+
+  /*
+   * The rota is loaded only when Reassign is pressed: the dashboard is in the
+   * entry chunk and the scheduling module is not. If today's rota has no such
+   * visit, the board is the next best place to fix it from.
+   */
+  const go = async (target: Alert['target']) => {
+    if (target.kind === 'path') {
+      navigate(target.to)
+      return
+    }
+    const { boardOn } = await import('@/features/scheduling/board-data')
+    const visit = boardOn(TODAY).find(
+      (v) => v.caregiverName === target.caregiver && v.recipientName === target.recipient,
+    )
+    navigate(visit ? `/scheduling/visits/${visit.id}/assign` : '/scheduling')
+  }
+
   return (
     <section aria-labelledby="critical-alerts">
       <SectionHeading
@@ -48,6 +70,7 @@ export function CriticalAlerts() {
                 </span>
                 <button
                   type="button"
+                  onClick={() => void go(a.target)}
                   className={cn(
                     'h-11 flex-1 rounded-lg px-4 text-sm font-medium text-white transition-colors sm:h-9 sm:flex-none',
                     a.destructive

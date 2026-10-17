@@ -1,5 +1,7 @@
-import { SIGNED_IN } from '@/lib/session'
 import { TODAY } from '@/lib/today'
+import { publishedAnnouncements } from './announcements'
+import type { Attachment } from './data'
+import { richToPlain } from './rich-text'
 import { addDays, boardOn, formatTime } from '@/features/scheduling/board-data'
 import { referenceFor } from '@/features/scheduling/visit-detail'
 
@@ -28,6 +30,12 @@ export interface Notice {
   to: string | null
   /** The visit's own reference, so it can be quoted. */
   reference: string | null
+  /** Above normal only, on an announcement that was sent that way. */
+  priority?: 'high' | 'urgent'
+  /** A file sent with an announcement. */
+  attachment?: Attachment
+  /** The announcement's own formatting; `body` stays the words alone. */
+  html?: string
 }
 
 /** How far back the visit feed reads. */
@@ -41,7 +49,10 @@ export const NOTICE_WINDOW_DAYS = 7
  * late arrivals, missed doses and uncovered slots are alerts, they already have
  * a screen, and a second copy here would be a second queue to work.
  */
-export function visitNotices(asAt = TODAY, days = NOTICE_WINDOW_DAYS): Notice[] {
+export function visitNotices(
+  asAt = TODAY,
+  days = NOTICE_WINDOW_DAYS,
+): Notice[] {
   const notices: Notice[] = []
 
   for (let i = 0; i < days; i++) {
@@ -75,47 +86,29 @@ export function visitNotices(asAt = TODAY, days = NOTICE_WINDOW_DAYS): Notice[] 
 }
 
 /**
- * Broadcasts. Written by a person, sent to everyone, and answered nowhere —
+ * Broadcasts. Written by a person, sent to a group, and answered nowhere —
  * there is no group conversation in this app for a reply to land in.
+ *
+ * The feed shows what has gone out: the Announcements screen holds the drafts,
+ * the scheduled ones and the archive, and only the published ones are a notice
+ * anybody was sent. One store behind both, so publishing on that screen puts
+ * the announcement in this inbox and archiving takes it back out.
  */
-const announcements: Notice[] = [
-  {
-    id: 'ann-3',
-    kind: 'announcement',
-    title: 'Coordination meeting tomorrow, 9:00 AM',
-    body: 'North Branch meeting room. Bring anything still open on your caseload — we will go through the week together rather than one by one.',
-    at: TODAY,
-    time: '08:05',
-    author: SIGNED_IN,
-    to: null,
-    reference: null,
-  },
-  {
-    id: 'ann-2',
-    kind: 'announcement',
-    title: 'Write visit records up on the day',
-    body: 'A lot of last week closed with no record against it. If signal is the problem in the flat, file it from the office on the way home rather than leaving it to the weekend.',
-    at: '2026-07-22',
-    time: '17:30',
-    author: 'Mike Chen',
-    to: '/live-monitoring/history',
-    reference: null,
-  },
-  {
-    id: 'ann-1',
-    kind: 'announcement',
-    title: 'Credential renewals this month',
-    body: 'HR is collecting renewal paperwork. Check the expiry dates on your own profile before the end of the month — a lapsed licence takes you off the rota the day it runs out.',
-    at: '2026-07-20',
-    time: '09:15',
-    author: 'Dr. Jane Foster',
-    to: '/caregivers',
-    reference: null,
-  },
-]
-
 export function announcementNotices(): Notice[] {
-  return announcements
+  return publishedAnnouncements().map((a) => ({
+    id: a.id,
+    kind: 'announcement',
+    title: a.title,
+    body: richToPlain(a.body),
+    html: a.body,
+    at: a.date,
+    time: a.time,
+    author: a.author,
+    to: a.to,
+    reference: null,
+    priority: a.priority === 'normal' ? undefined : a.priority,
+    attachment: a.attachment,
+  }))
 }
 
 export function allNotices(asAt = TODAY): Notice[] {
@@ -130,7 +123,9 @@ export function findNotice(id: string | undefined): Notice | undefined {
 /** Newest first, with the clock breaking a same-day tie. */
 export function sortNotices(list: Notice[]): Notice[] {
   return [...list].sort((a, b) =>
-    `${b.at} ${b.time ?? '00:00'}`.localeCompare(`${a.at} ${a.time ?? '00:00'}`),
+    `${b.at} ${b.time ?? '00:00'}`.localeCompare(
+      `${a.at} ${a.time ?? '00:00'}`,
+    ),
   )
 }
 

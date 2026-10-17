@@ -22,6 +22,24 @@ import { useSyncExternalStore } from 'react'
 import { SIGNED_IN } from '@/lib/session'
 import { createTask } from './data'
 import type { TaskCategory, TaskPriority } from './data'
+import type { StaffGroupId } from './groups'
+import { groupById } from './groups'
+
+export type TemplateFrequency =
+  'daily' | 'per-visit' | 'per-shift' | 'weekly' | 'monthly' | 'as-needed'
+
+export const frequencies: { id: TemplateFrequency; label: string }[] = [
+  { id: 'daily', label: 'Daily' },
+  { id: 'per-visit', label: 'Every visit' },
+  { id: 'per-shift', label: 'Every shift' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'monthly', label: 'Monthly' },
+  { id: 'as-needed', label: 'As needed' },
+]
+
+export function frequencyLabel(id: TemplateFrequency): string {
+  return frequencies.find((f) => f.id === id)?.label ?? 'As needed'
+}
 
 export interface TaskTemplate {
   id: string
@@ -30,12 +48,23 @@ export interface TaskTemplate {
   category: TaskCategory
   priority: TaskPriority
   /**
-   * When this is normally done, in words. Guidance for whoever raises it —
-   * nothing reads this and nothing fires on it.
+   * How often it comes round. The design calls this the schedule, and it is
+   * one in the sense a rota is: it says what the pattern is, so a coordinator
+   * can find every daily checklist at once. Nothing fires on it — see the note
+   * at the top of this file.
+   */
+  frequency: TemplateFrequency
+  /**
+   * The rest of the when, in words: "first thing, on the morning visit". Read
+   * by a person, by nothing else.
    */
   cadence: string
-  /** Who it usually falls to. Pre-selected when the template is applied. */
-  suggestedAssignee: string | null
+  /**
+   * The group it belongs to, as the design assigns one: a checklist for the
+   * morning round is for whoever is on the round, not for one named caregiver.
+   * Applying it narrows the assignee list to the people in this group.
+   */
+  assignedTo: StaffGroupId
   /** The creator's estimate for the whole list, in minutes. */
   estimateMinutes: number
   /** The steps, in order. */
@@ -50,10 +79,11 @@ const templates: TaskTemplate[] = [
     name: 'Morning care routine',
     description:
       'The standard morning round: personal care, medication and breakfast, in the order the care plans assume.',
-    category: 'paperwork',
+    category: 'daily-care',
     priority: 'medium',
-    cadence: 'Usually first thing, on the morning visit',
-    suggestedAssignee: null,
+    frequency: 'daily',
+    cadence: 'first thing, on the morning visit',
+    assignedTo: 'all-caregivers',
     estimateMinutes: 45,
     items: [
       'Check the care plan for anything changed since the last visit',
@@ -71,10 +101,11 @@ const templates: TaskTemplate[] = [
     name: 'Medication round',
     description:
       'Administering and documenting a scheduled round, including what to do about a refusal.',
-    category: 'paperwork',
+    category: 'medication',
     priority: 'high',
-    cadence: 'Usually at each scheduled round',
-    suggestedAssignee: null,
+    frequency: 'per-visit',
+    cadence: 'at each scheduled round',
+    assignedTo: 'certified-staff',
     estimateMinutes: 20,
     items: [
       'Check the chart against the pack',
@@ -91,10 +122,11 @@ const templates: TaskTemplate[] = [
     name: 'Weekly health check',
     description:
       'Vitals, mobility and orientation, written up against the client record.',
-    category: 'paperwork',
+    category: 'assessment',
     priority: 'medium',
-    cadence: 'Usually once a week, with the senior caregiver',
-    suggestedAssignee: 'Emma Wilson',
+    frequency: 'weekly',
+    cadence: 'with the senior caregiver',
+    assignedTo: 'senior-caregivers',
     estimateMinutes: 30,
     items: [
       'Blood pressure, pulse and temperature',
@@ -112,10 +144,11 @@ const templates: TaskTemplate[] = [
     name: 'Incident follow-up',
     description:
       'What happens after a write-up is filed: telling the family, checking the environment, and deciding the outcome.',
-    category: 'incident',
+    category: 'safety',
     priority: 'high',
-    cadence: 'Usually the same day the incident is written up',
-    suggestedAssignee: 'Mike Chen',
+    frequency: 'as-needed',
+    cadence: 'the same day the incident is written up',
+    assignedTo: 'all-staff',
     estimateMinutes: 25,
     items: [
       'Read the write-up and the visit it came from',
@@ -131,10 +164,11 @@ const templates: TaskTemplate[] = [
     id: 'tpl-handover',
     name: 'Shift handover',
     description: 'What the next caregiver needs to know before they arrive.',
-    category: 'admin',
+    category: 'operations',
     priority: 'medium',
-    cadence: 'Usually at the end of a shift',
-    suggestedAssignee: null,
+    frequency: 'per-shift',
+    cadence: 'at the end of a shift',
+    assignedTo: 'all-caregivers',
     estimateMinutes: 10,
     items: [
       'Anything not done, and why',
@@ -151,10 +185,11 @@ const templates: TaskTemplate[] = [
     name: 'Monthly care plan review',
     description:
       'Going back over the plan with the family: what is working, what has changed, what the hours should be.',
-    category: 'family',
+    category: 'planning',
     priority: 'medium',
-    cadence: 'Usually once a month',
-    suggestedAssignee: 'Mike Chen',
+    frequency: 'monthly',
+    cadence: '',
+    assignedTo: 'care-managers',
     estimateMinutes: 60,
     items: [
       'Read the last month of visit notes',
@@ -192,8 +227,23 @@ export function useTemplates(): number {
 
 export function allTemplates(): TaskTemplate[] {
   return [...templates].sort(
-    (a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name),
+    (a, b) =>
+      Number(b.active) - Number(a.active) || a.name.localeCompare(b.name),
   )
+}
+
+/** The same move, for the templates written under a category being deleted. */
+export function recategoriseTemplates(
+  from: TaskCategory,
+  to: TaskCategory,
+): void {
+  let moved = false
+  for (const template of templates) {
+    if (template.category !== from) continue
+    template.category = to
+    moved = true
+  }
+  if (moved) emit()
 }
 
 export function templateById(id: string | undefined): TaskTemplate | undefined {
@@ -208,6 +258,143 @@ export function createTemplate(draft: TemplateDraft): string {
   templates.unshift({ ...draft, id, active: true, createdBy: SIGNED_IN })
   emit()
   return id
+}
+
+/**
+ * What a template looks like on its way in from a file. Everything optional
+ * except the two things a checklist cannot do without: a name and its steps.
+ */
+interface ImportedTemplate {
+  name?: unknown
+  description?: unknown
+  category?: unknown
+  priority?: unknown
+  frequency?: unknown
+  cadence?: unknown
+  assignedTo?: unknown
+  estimateMinutes?: unknown
+  items?: unknown
+}
+
+export interface ImportResult {
+  added: number
+  /** Entries that were not a usable checklist, or were already here by name. */
+  skipped: number
+  /** Set where the file itself could not be read as a list of templates. */
+  error?: string
+}
+
+const PRIORITIES: TaskPriority[] = [
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'normal',
+]
+
+/**
+ * Read templates out of a JSON file the user picked.
+ *
+ * The file is whatever they hand over, so nothing in it is trusted: every field
+ * is checked and anything unusable is dropped rather than guessed at. A name
+ * already on the board is skipped, so importing the same file twice does not
+ * quietly double every checklist.
+ *
+ * Accepts either a bare array or `{ "templates": [...] }`, which is what this
+ * screen's own export writes.
+ */
+export function importTemplates(
+  text: string,
+  knownCategories: TaskCategory[],
+): ImportResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { added: 0, skipped: 0, error: 'That file is not JSON.' }
+  }
+
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' &&
+        parsed !== null &&
+        Array.isArray((parsed as { templates?: unknown }).templates)
+      ? (parsed as { templates: unknown[] }).templates
+      : null
+
+  if (!list)
+    return {
+      added: 0,
+      skipped: 0,
+      error: 'No templates in that file — it needs a list of them.',
+    }
+
+  const taken = new Set(templates.map((t) => t.name.trim().toLowerCase()))
+  let added = 0
+  let skipped = 0
+
+  for (const raw of list) {
+    if (typeof raw !== 'object' || raw === null) {
+      skipped += 1
+      continue
+    }
+    const entry = raw as ImportedTemplate
+    const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+    const items = Array.isArray(entry.items)
+      ? entry.items
+          .filter((i): i is string => typeof i === 'string' && i.trim() !== '')
+          .map((i) => i.trim())
+      : []
+
+    if (name === '' || items.length === 0 || taken.has(name.toLowerCase())) {
+      skipped += 1
+      continue
+    }
+
+    const category =
+      typeof entry.category === 'string' &&
+      knownCategories.includes(entry.category)
+        ? entry.category
+        : // Nothing invented: a category this agency does not keep becomes the
+          // one every uncategorised task already falls under.
+          knownCategories[0]
+    const priority =
+      typeof entry.priority === 'string' &&
+      PRIORITIES.includes(entry.priority as TaskPriority)
+        ? (entry.priority as TaskPriority)
+        : 'medium'
+    const estimate =
+      typeof entry.estimateMinutes === 'number' &&
+      Number.isFinite(entry.estimateMinutes) &&
+      entry.estimateMinutes > 0
+        ? Math.round(entry.estimateMinutes)
+        : items.length * 5
+
+    createTemplate({
+      name,
+      description:
+        typeof entry.description === 'string' ? entry.description.trim() : '',
+      category,
+      priority,
+      frequency:
+        typeof entry.frequency === 'string' &&
+        frequencies.some((f) => f.id === entry.frequency)
+          ? (entry.frequency as TemplateFrequency)
+          : 'as-needed',
+      cadence: typeof entry.cadence === 'string' ? entry.cadence.trim() : '',
+      assignedTo:
+        typeof entry.assignedTo === 'string' &&
+        groupById(entry.assignedTo as StaffGroupId).id === entry.assignedTo
+          ? (entry.assignedTo as StaffGroupId)
+          : 'all-staff',
+      estimateMinutes: estimate,
+      items,
+    })
+    taken.add(name.toLowerCase())
+    added += 1
+  }
+
+  return { added, skipped }
 }
 
 export function updateTemplate(id: string, draft: TemplateDraft): void {
@@ -268,7 +455,10 @@ export interface ApplyOptions {
  * — never on a clock. What comes out is an ordinary written task with the steps
  * copied onto it as an unticked checklist.
  */
-export function applyTemplate(id: string, options: ApplyOptions): string | undefined {
+export function applyTemplate(
+  id: string,
+  options: ApplyOptions,
+): string | undefined {
   const template = templateById(id)
   if (!template) return undefined
   return createTask({

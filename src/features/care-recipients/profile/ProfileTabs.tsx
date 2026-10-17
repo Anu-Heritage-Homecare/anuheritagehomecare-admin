@@ -20,7 +20,7 @@ export function ProfileTabs({ recipientId }: { recipientId: string }) {
   }, [pathname])
 
   return (
-    <nav aria-label="Profile sections" className="border-line border-t px-1 sm:px-2">
+    <nav aria-label="Profile sections" className="border-line border-t px-1 sm:px-2 print:hidden">
       <ul
         ref={railRef}
         // py-1 keeps the 2px focus ring from being clipped by overflow-y:auto,

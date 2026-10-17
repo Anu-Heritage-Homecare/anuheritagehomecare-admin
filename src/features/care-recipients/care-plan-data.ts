@@ -240,3 +240,20 @@ const plans: Record<string, CarePlan> = {
 export function getCarePlan(recipientId: string): CarePlan | undefined {
   return plans[recipientId]
 }
+
+/**
+ * Saves the Edit Care Plan page — or creates the plan, where there was none —
+ * and records the change at the top of the revision history. Held in memory
+ * for the session, like everything else this app writes.
+ */
+export function saveCarePlan(
+  recipientId: string,
+  plan: Omit<CarePlan, 'revisions'>,
+  revision: Omit<Revision, 'id'>,
+): void {
+  const previous = plans[recipientId]?.revisions ?? []
+  plans[recipientId] = {
+    ...plan,
+    revisions: [{ ...revision, id: `r-${Date.now().toString(36)}` }, ...previous],
+  }
+}

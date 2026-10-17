@@ -24,7 +24,7 @@ export function AdminLayout() {
 
       <Sidebar open={navOpen} onClose={() => setNavRequested(false)} />
 
-      <div className="lg:pl-sidebar">
+      <div className="lg:pl-sidebar print:pl-0">
         <Topbar navOpen={navOpen} onMenuClick={() => setNavRequested(true)} />
         <main
           id="main-content"

@@ -18,7 +18,8 @@ export interface Prescription {
   /** ISO, for sorting. `startDateLabel` is what gets rendered. */
   startDate: string
   startDateLabel: string
-  adherence: number
+  /** Null until a dose has been recorded — a new prescription has no history. */
+  adherence: number | null
   status: PrescriptionStatus
   lastAdministered: string
   /** Surfaced as an amber chip on the card. */
@@ -274,6 +275,60 @@ export function getMedicationPlan(
   return plans[recipientId]
 }
 
+/* --------------------------------- adding --------------------------------- */
+
+function shortDate(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/**
+ * Adds a prescription from the Add Medication page, records it in the
+ * prescription history and keeps the Active Medications count true. A
+ * recipient with no plan gets one. Held in memory for the session.
+ */
+export function addPrescription(
+  recipientId: string,
+  rx: Omit<Prescription, 'id' | 'adherence' | 'lastAdministered' | 'status' | 'startDateLabel'>,
+): void {
+  const prescription: Prescription = {
+    ...rx,
+    id: `rx-new-${Date.now().toString(36)}`,
+    startDateLabel: shortDate(rx.startDate),
+    adherence: null,
+    status: 'active',
+    lastAdministered: 'Not yet administered',
+  }
+  const audit: AuditEntry = {
+    id: `a-new-${Date.now().toString(36)}`,
+    dateIso: rx.startDate,
+    date: shortDate(rx.startDate),
+    title: `${rx.name} ${rx.strength} Added`,
+    detail: `Prescribed by ${rx.prescribedBy}${rx.purpose ? ` for ${rx.purpose.toLowerCase()}` : ''}`,
+  }
+  const plan = plans[recipientId] ?? {
+    stats: [
+      { id: 'active', label: 'Active Medications', value: '0', hint: 'All current prescriptions', hintTone: 'slate', icon: Link2, tone: 'blue' },
+      { id: 'adherence', label: 'Adherence Rate', value: '—', hint: 'No doses recorded yet', hintTone: 'slate', icon: Activity, tone: 'green' },
+      { id: 'next-dose', label: 'Next Dose Due', value: '—', hint: 'No dosing schedule yet', hintTone: 'slate', icon: Clock, tone: 'blue' },
+      { id: 'alerts', label: 'Active Alerts', value: 'None', hint: 'No interaction warnings', hintTone: 'slate', icon: TriangleAlert, tone: 'amber' },
+    ],
+    prescriptions: [],
+    scheduleDateIso: rx.startDate,
+    scheduleDate: shortDate(rx.startDate),
+    doses: [],
+    warnings: [],
+    audits: [],
+  }
+  const prescriptions = [...plan.prescriptions, prescription]
+  const active = prescriptions.filter((p) => p.status === 'active').length
+  plans[recipientId] = {
+    ...plan,
+    prescriptions,
+    stats: plan.stats.map((s) => (s.id === 'active' ? { ...s, value: String(active) } : s)),
+    audits: [audit, ...plan.audits].sort((a, b) => b.dateIso.localeCompare(a.dateIso)),
+  }
+}
+
 /* --------------------------------- sorting -------------------------------- */
 
 export type MedicationSort = 'newest' | 'oldest' | 'adherence' | 'name'
@@ -291,7 +346,8 @@ const comparators: Record<
 > = {
   newest: (a, b) => b.startDate.localeCompare(a.startDate),
   oldest: (a, b) => a.startDate.localeCompare(b.startDate),
-  adherence: (a, b) => a.adherence - b.adherence,
+  // Unrecorded adherence sorts last: there is nothing yet to be low.
+  adherence: (a, b) => (a.adherence ?? Infinity) - (b.adherence ?? Infinity),
   name: (a, b) => a.name.localeCompare(b.name),
 }
 

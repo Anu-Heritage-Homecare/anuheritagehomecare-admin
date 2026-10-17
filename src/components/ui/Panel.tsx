@@ -5,6 +5,8 @@ import { cn } from '@/lib/cn'
 
 interface PanelProps {
   title: string
+  /** One line under the title, where a design gives the panel a subtitle. */
+  description?: string
   /** Small badge to the right of the title, e.g. "4 Active". */
   badge?: ReactNode
   /** Footer link rendered centred beneath the body. */
@@ -13,15 +15,19 @@ interface PanelProps {
   /** Set when the body supplies its own padding (tables, divided lists). */
   flush?: boolean
   className?: string
+  /** Overrides the heading's type, where a design gives a panel a larger one. */
+  titleClassName?: string
 }
 
 export function Panel({
   title,
+  description,
   badge,
   action,
   children,
   flush,
   className,
+  titleClassName,
 }: PanelProps) {
   const headingId = `panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
@@ -32,16 +38,25 @@ export function Panel({
     >
       <div
         className={cn(
-          'flex items-center justify-between gap-3 px-4 pt-4',
+          'flex justify-between gap-3 px-4 pt-4',
+          description ? 'items-start' : 'items-center',
           flush ? 'pb-3' : 'pb-0',
         )}
       >
-        <h2
-          id={headingId}
-          className="text-ink min-w-0 text-sm font-semibold tracking-tight"
-        >
-          {title}
-        </h2>
+        <div className="min-w-0">
+          <h2
+            id={headingId}
+            className={cn(
+              'text-ink min-w-0 text-sm font-semibold tracking-tight',
+              titleClassName,
+            )}
+          >
+            {title}
+          </h2>
+          {description && (
+            <p className="text-ink-muted mt-0.5 text-xs">{description}</p>
+          )}
+        </div>
         {badge}
       </div>
 

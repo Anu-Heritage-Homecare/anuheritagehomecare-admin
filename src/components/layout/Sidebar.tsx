@@ -133,7 +133,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ? { role: 'dialog' as const, 'aria-modal': true, 'aria-label': 'Navigation' }
           : {})}
         className={cn(
-          'border-line bg-surface fixed inset-y-0 left-0 z-40 flex w-sidebar flex-col border-r',
+          'border-line bg-surface fixed inset-y-0 left-0 z-40 flex w-sidebar flex-col border-r print:hidden',
           'transition-transform duration-200 ease-out focus:outline-hidden lg:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full',
         )}

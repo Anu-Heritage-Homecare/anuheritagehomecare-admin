@@ -465,6 +465,14 @@ export interface LiveAlert {
   subject: string
   /** The other party, where there is one. */
   counterpart: string | null
+  /**
+   * The two roles named, where the alert came off a visit. Separate from
+   * `subject`/`counterpart`, which say who the alert is *about* and vary by
+   * kind — a card that prints "Recipient:" and "Caregiver:" has to know which
+   * is which, and a credential or client-status alert has neither.
+   */
+  recipientName: string | null
+  caregiverName: string | null
   label: string
   detail: string
   /**
@@ -624,6 +632,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
   for (const visit of rows) {
     if (visit.state === 'unattended') {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `unattended-${visit.id}`,
         kind: 'unattended',
         thread: visit.id,
@@ -658,6 +668,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
 
     if (visit.state === 'overdue') {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `overdue-${visit.id}`,
         kind: 'overdue',
         thread: visit.id,
@@ -711,6 +723,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
        */
       if (visit.status === 'late-arrival' || late > CHECK_IN_GRACE_MINUTES) {
         alerts.push({
+          recipientName: visit.recipientName,
+          caregiverName: visit.caregiverName,
           id: `late-${visit.id}`,
           kind: 'late-arrival',
         thread: visit.id,
@@ -764,6 +778,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
       const over = gapFrom(visit, visit.end, visit.clockOut)
       if (over > OVERRUN_GRACE_MINUTES) {
         alerts.push({
+          recipientName: visit.recipientName,
+          caregiverName: visit.caregiverName,
           id: `overran-${visit.id}`,
           kind: 'overran',
         thread: visit.id,
@@ -789,6 +805,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
 
     if (visit.state === 'overrunning') {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `overrun-${visit.id}`,
         kind: 'overrunning',
         thread: visit.id,
@@ -813,6 +831,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
 
     if (visit.state === 'unrecorded') {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `unrecorded-${visit.id}`,
         kind: 'unrecorded',
         thread: visit.id,
@@ -847,6 +867,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
 
     if (visit.state === 'upcoming' && visit.caregiverId === null) {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `unfilled-${visit.id}`,
         kind: 'unfilled',
         thread: visit.id,
@@ -873,6 +895,8 @@ export function alertsAt(date = TODAY, now = NOW): LiveAlert[] {
 
     if (visit.state === 'uncovered') {
       alerts.push({
+        recipientName: visit.recipientName,
+        caregiverName: visit.caregiverName,
         id: `uncovered-${visit.id}`,
         kind: 'uncovered',
         thread: visit.id,
@@ -957,6 +981,8 @@ function clinicalAlerts(
           out.push({
             id: `dose-${visit.recipientId}-${dose.id}`,
             kind: 'missed-dose',
+            recipientName: visit.recipientName,
+            caregiverName: null,
             thread: `dose:${visit.recipientId}:${dose.id}`,
             serviceType: visit.type,
             visitState: visit.state,
@@ -1000,6 +1026,8 @@ function clinicalAlerts(
           out.push({
             id: `dose-open-${visit.recipientId}-${dose.id}`,
             kind: 'unrecorded-dose',
+            recipientName: visit.recipientName,
+            caregiverName: null,
             thread: `dose:${visit.recipientId}:${dose.id}`,
             serviceType: visit.type,
             visitState: visit.state,
@@ -1033,6 +1061,8 @@ function clinicalAlerts(
       out.push({
         id: `incident-${note.id}`,
         kind: 'incident',
+        recipientName: visit.recipientName,
+        caregiverName: null,
             thread: `note:${note.id}`,
             serviceType: visit.type,
             visitState: visit.state,
@@ -1105,6 +1135,8 @@ function fromConflict(
     return {
       id: conflict.id,
       kind: 'lapsed-credential',
+      recipientName: null,
+      caregiverName: member?.name ?? null,
       thread: conflict.id,
       // Not about one visit, so neither field is borrowed from one.
       serviceType: null,
@@ -1136,6 +1168,8 @@ function fromConflict(
     return {
       id: conflict.id,
       kind: 'double-booked',
+      recipientName: null,
+      caregiverName: member?.name ?? null,
       thread: conflict.id,
       // Not about one visit, so neither field is borrowed from one.
       serviceType: null,
@@ -1167,6 +1201,8 @@ function fromConflict(
     return {
       id: conflict.id,
       kind: 'inactive-client',
+      recipientName: recipient?.recipientName ?? null,
+      caregiverName: null,
       thread: conflict.id,
       // Not about one visit, so neither field is borrowed from one.
       serviceType: null,
@@ -1205,6 +1241,8 @@ function fromConflict(
     return {
       id: conflict.id,
       kind: 'over-contract',
+      recipientName: null,
+      caregiverName: member?.name ?? null,
       thread: conflict.id,
       // Not about one visit, so neither field is borrowed from one.
       serviceType: null,
@@ -1485,6 +1523,8 @@ export function countByTiming(
 
 export interface ActivityEntry {
   id: string
+  /** The visit this happened to, so the page's filters can cut the feed. */
+  visitId: string
   /** "HH:MM", 24-hour. */
   at: string
   label: string
@@ -1513,6 +1553,7 @@ export function activityAt(date = TODAY, now = NOW): ActivityEntry[] {
       const at = visit.clockIn ?? visit.start
       out.push({
         id: `${visit.id}-in`,
+        visitId: visit.id,
         at,
         label: visit.clockIn
           ? `${visit.caregiverName} checked in for ${visit.recipientName}`
@@ -1528,6 +1569,7 @@ export function activityAt(date = TODAY, now = NOW): ActivityEntry[] {
     if (start <= nowMin && visit.caregiverId !== null && !visit.recorded) {
       out.push({
         id: `${visit.id}-nocheck`,
+        visitId: visit.id,
         at: visit.start,
         label: `${visit.recipientName}’s visit was due to start`,
         detail: `${visit.caregiverName} — no visit record yet`,
@@ -1539,6 +1581,7 @@ export function activityAt(date = TODAY, now = NOW): ActivityEntry[] {
     if (start <= nowMin && visit.caregiverId === null) {
       out.push({
         id: `${visit.id}-unfilled`,
+        visitId: visit.id,
         at: visit.start,
         label: `${visit.recipientName}’s visit was due to start`,
         detail: 'Nobody assigned',
@@ -1552,6 +1595,7 @@ export function activityAt(date = TODAY, now = NOW): ActivityEntry[] {
       // the honest event is the window closing with a record on file.
       out.push({
         id: `${visit.id}-out`,
+        visitId: visit.id,
         at: visit.end,
         label: `${visit.recipientName}’s visit window closed`,
         detail: `${visit.caregiverName} — written up${visit.clockOut ? `, clocked out ${formatTime(visit.clockOut)}` : ', no clock-out entered'}. Nothing confirms the departure.`,
@@ -1563,6 +1607,7 @@ export function activityAt(date = TODAY, now = NOW): ActivityEntry[] {
     if (end <= nowMin && !visit.overnight && visit.caregiverId !== null && !visit.recorded) {
       out.push({
         id: `${visit.id}-lapsed`,
+        visitId: visit.id,
         at: visit.end,
         label: `${visit.recipientName}’s visit window closed`,
         detail: `${visit.caregiverName} — nothing written up`,

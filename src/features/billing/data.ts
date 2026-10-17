@@ -72,6 +72,11 @@ export interface Transaction {
   at: string
   /** What the payment settles, so an amount can be traced. */
   reference: string
+  /** Recorded by hand: the paying bank, and any note. */
+  bank?: string
+  note?: string
+  /** Who entered it, for a payment recorded by hand. */
+  recordedBy?: string
 }
 
 export interface HoursPackage {
@@ -395,6 +400,65 @@ export const transactions: Transaction[] = [
     at: '2026-07-17',
     reference: 'Live-in Plan · monthly renewal',
   },
+  /*
+   * Settlements of invoice-billed accounts in the receivables book
+   * (ledger.ts). Amount and date must match the invoice — `ledgerMismatches()`
+   * reports any that drift.
+   */
+  {
+    id: 'TX-2026-910',
+    client: 'Okafor Household',
+    amount: 4200,
+    method: 'Mastercard •••• 6620',
+    status: 'succeeded',
+    at: '2026-07-23',
+    reference: 'INV-2026-158 · invoice settlement',
+  },
+  {
+    id: 'TX-2026-909',
+    client: 'Adeyemi Family',
+    amount: 7800,
+    method: 'Bank transfer',
+    status: 'succeeded',
+    at: '2026-07-22',
+    reference: 'INV-2026-163 · invoice settlement',
+  },
+  {
+    id: 'TX-2026-901',
+    client: 'Musa Family',
+    amount: 5400,
+    method: 'Bank transfer',
+    status: 'succeeded',
+    at: '2026-07-18',
+    reference: 'INV-2026-161 · invoice settlement',
+  },
+  {
+    id: 'TX-2026-899',
+    client: 'Babalola Senior Living',
+    amount: 27_900,
+    method: 'Bank transfer',
+    status: 'succeeded',
+    at: '2026-07-14',
+    reference: 'INV-2026-156 · invoice settlement',
+  },
+  {
+    id: 'TX-2026-897',
+    client: 'Adeyemi Family',
+    amount: 8100,
+    method: 'Bank transfer',
+    status: 'succeeded',
+    at: '2026-07-10',
+    reference: 'INV-2026-157 · invoice settlement',
+  },
+  {
+    id: 'TX-2026-895',
+    client: 'Okafor Household',
+    amount: 4200,
+    method: 'Mastercard •••• 6620',
+    status: 'succeeded',
+    at: '2026-07-02',
+    reference: 'INV-2026-152 · invoice settlement',
+  },
 ]
 
 /** Monthly revenue that isn't subscription MRR — hours top-ups and one-offs. */
@@ -501,6 +565,42 @@ export function revenueSeries(): { label: string; value: number }[] {
     label: t.month,
     value: Math.round(current * t.factor),
   }))
+}
+
+const monthYear = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+/**
+ * The last `count` months of `revenueSeries`, labelled with their year
+ * ("Feb 2026"). Months are counted back from TODAY's, so the labels cannot
+ * drift from the series.
+ */
+export function revenueMonths(count: number, today = TODAY) {
+  const series = revenueSeries()
+  const d = new Date(`${today.slice(0, 7)}-01T00:00:00Z`)
+  return series.slice(-count).map((point, i, window) => {
+    const at = new Date(d)
+    at.setUTCMonth(d.getUTCMonth() - (window.length - 1 - i))
+    return { label: monthYear.format(at), value: point.value }
+  })
+}
+
+/**
+ * Revenue over the last `count` months, and its change against the `count`
+ * months before. Needs `2 × count` months of trend.
+ */
+export function revenueOverWindow(count: number): { total: number; change: number } {
+  const series = revenueSeries()
+  const sum = (xs: { value: number }[]) => xs.reduce((s, p) => s + p.value, 0)
+  const total = sum(series.slice(-count))
+  const previous = sum(series.slice(-2 * count, -count))
+  return {
+    total,
+    change: Math.round(((total - previous) / previous) * 1000) / 10,
+  }
 }
 
 /**

@@ -1,8 +1,77 @@
-import { MoreHorizontal } from 'lucide-react'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { VisitRecord } from '../visits-data'
 import { formatDuration, formatVisitDate } from '../visits-data'
+import { staffMembers } from '@/features/caregivers/staff'
 import { VisitStatusBadge } from '@/components/ui/StatusBadge'
+import { DropdownMenu } from '@/components/ui/DropdownMenu'
+import type { MenuItem } from '@/components/ui/DropdownMenu'
+import { Drawer } from '@/components/ui/Drawer'
 import { cn } from '@/lib/cn'
+
+/*
+ * Row actions for a past visit. History records are their own fixture, not the
+ * scheduling board's visits, so "View details" opens the record here (with the
+ * notes the desktop table has no column for) rather than linking to a board
+ * visit that may not be the same one.
+ */
+function caregiverPath(name: string): string | undefined {
+  const member = staffMembers.find((m) => m.name === name)
+  return member ? `/caregivers/${member.id}` : undefined
+}
+
+function itemsFor(v: VisitRecord, recipientId: string, onView: () => void): MenuItem[] {
+  const caregiver = caregiverPath(v.caregiver)
+  return [
+    { id: 'view', label: 'View visit details', onSelect: onView },
+    ...(caregiver ? [{ id: 'caregiver', label: `View ${v.caregiver}`, to: caregiver }] : []),
+    { id: 'note', label: 'Add care note', to: `/care-recipients/${recipientId}/notes` },
+    { id: 'follow-up', label: 'Schedule follow-up visit', to: `/scheduling/visits/new?recipient=${recipientId}` },
+  ]
+}
+
+function VisitDetails({ visit, recipientId }: { visit: VisitRecord; recipientId: string }) {
+  const caregiver = caregiverPath(visit.caregiver)
+  const rows: [string, React.ReactNode][] = [
+    ['Date and time', formatVisitDate(visit)],
+    ['Caregiver', caregiver ? <Link to={caregiver} className="text-brand-700 hover:underline">{visit.caregiver}</Link> : visit.caregiver],
+    ['Visit type', visit.type],
+    ['Duration', formatDuration(visit.durationHours)],
+    ['Clock in', visit.clockIn ?? '—'],
+    ['Clock out', visit.clockOut ?? '—'],
+    ['Status', <VisitStatusBadge key="s" status={visit.status} />],
+  ]
+  return (
+    <div className="space-y-5 p-5">
+      <dl className="divide-line divide-y text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between gap-4 py-2.5 first:pt-0">
+            <dt className="text-ink-muted">{k}</dt>
+            <dd className="text-ink text-right font-medium">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div>
+        <h3 className="text-ink text-sm font-semibold">Caregiver notes</h3>
+        <p className="text-ink-muted mt-1.5 text-sm break-words">{visit.notes || 'No notes were recorded.'}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Link
+          to={`/care-recipients/${recipientId}/notes`}
+          className="border-control text-ink hover:bg-sunken inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium"
+        >
+          Add care note
+        </Link>
+        <Link
+          to={`/scheduling/visits/new?recipient=${recipientId}`}
+          className="bg-brand-600 hover:bg-brand-700 inline-flex h-9 items-center rounded-lg px-3 text-sm font-semibold text-white"
+        >
+          Schedule follow-up visit
+        </Link>
+      </div>
+    </div>
+  )
+}
 
 const columns = [
   'Date and Time',
@@ -14,7 +83,9 @@ const columns = [
   'Status',
 ]
 
-export function VisitTable({ rows }: { rows: VisitRecord[] }) {
+export function VisitTable({ rows, recipientId }: { rows: VisitRecord[]; recipientId: string }) {
+  const [viewing, setViewing] = useState<VisitRecord | null>(null)
+
   if (rows.length === 0) {
     return (
       <p className="text-ink-subtle px-4 py-16 text-center text-sm">
@@ -90,13 +161,12 @@ export function VisitTable({ rows }: { rows: VisitRecord[] }) {
                   <VisitStatusBadge status={v.status} />
                 </td>
                 <td className="px-3 py-3 text-right xl:px-4">
-                  <button
-                    type="button"
-                    aria-label={`Actions for visit on ${formatVisitDate(v)}`}
-                    className="text-ink-subtle hover:bg-sunken hover:text-ink grid size-9 place-items-center rounded-lg"
-                  >
-                    <MoreHorizontal className="size-4.5" />
-                  </button>
+                  <span className="inline-flex">
+                    <DropdownMenu
+                      label={`Actions for visit on ${formatVisitDate(v)}`}
+                      items={itemsFor(v, recipientId, () => setViewing(v))}
+                    />
+                  </span>
                 </td>
               </tr>
             ))}
@@ -117,7 +187,13 @@ export function VisitTable({ rows }: { rows: VisitRecord[] }) {
                   {v.type} · {formatDuration(v.durationHours)}
                 </p>
               </div>
-              <VisitStatusBadge status={v.status} />
+              <div className="flex shrink-0 items-center gap-1">
+                <VisitStatusBadge status={v.status} />
+                <DropdownMenu
+                  label={`Actions for visit on ${formatVisitDate(v)}`}
+                  items={itemsFor(v, recipientId, () => setViewing(v))}
+                />
+              </div>
             </div>
 
             <dl className="text-ink-muted mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 text-sm min-[420px]:grid-cols-2">
@@ -137,6 +213,15 @@ export function VisitTable({ rows }: { rows: VisitRecord[] }) {
           </li>
         ))}
       </ul>
+
+      <Drawer
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        title="Visit Details"
+        subtitle={viewing ? `${viewing.type}, ${formatVisitDate(viewing)}` : undefined}
+      >
+        {viewing && <VisitDetails visit={viewing} recipientId={recipientId} />}
+      </Drawer>
     </>
   )
 }

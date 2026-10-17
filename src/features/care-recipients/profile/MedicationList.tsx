@@ -24,7 +24,7 @@ function StatusChip({ status }: { status: Prescription['status'] }) {
 }
 
 function PrescriptionCard({ rx }: { rx: Prescription }) {
-  const watch = rx.adherence < ADHERENCE_THRESHOLD
+  const watch = rx.adherence !== null && rx.adherence < ADHERENCE_THRESHOLD
 
   return (
     <li className="border-line relative overflow-hidden rounded-xl border">
@@ -82,6 +82,10 @@ function PrescriptionCard({ rx }: { rx: Prescription }) {
             <dt className="text-ink-subtle text-[0.65rem] font-semibold tracking-wider uppercase">
               Adherence
             </dt>
+            {rx.adherence === null ? (
+              <dd className="text-ink-subtle basis-full pt-1 text-xs">No doses recorded yet</dd>
+            ) : (
+              <>
             <dd
               className={cn(
                 'text-xs font-semibold tabular-nums',
@@ -108,6 +112,8 @@ function PrescriptionCard({ rx }: { rx: Prescription }) {
                 />
               </div>
             </dd>
+              </>
+            )}
           </div>
         </dl>
       </div>

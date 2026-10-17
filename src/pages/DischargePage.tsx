@@ -19,6 +19,7 @@ import {
   RecipientStatusBadge,
 } from '@/components/ui/StatusBadge'
 import { cn } from '@/lib/cn'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 export function DischargePage() {
   const { id } = useParams()
@@ -173,9 +174,9 @@ export function DischargePage() {
               >
                 {verb} reason <span className="text-red-600">*</span>
               </label>
-              <select
+              <SelectBox
                 id="reason"
-                required
+                aria-required="true"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 className="border-line bg-surface text-ink focus:border-brand-400 mt-1.5 h-10 w-full rounded-lg border px-3 text-sm"
@@ -186,7 +187,7 @@ export function DischargePage() {
                     {r}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </div>
 
             <div>

@@ -2,7 +2,10 @@ import { useSyncExternalStore } from 'react'
 import { SIGNED_IN } from '@/lib/session'
 import { NOW, TODAY } from '@/lib/today'
 import { familyAccounts } from '@/features/families/directory-data'
-import type { FamilyAccount, LogSource } from '@/features/families/directory-data'
+import type {
+  FamilyAccount,
+  LogSource,
+} from '@/features/families/directory-data'
 import {
   getFamilyRecord,
   logContact,
@@ -19,6 +22,7 @@ import { recipients } from '@/features/care-recipients/data'
 import { formatTime } from '@/features/caregivers/schedule-data'
 import { addDays, boardOn } from '@/features/scheduling/board-data'
 import { minutesOfDay } from '@/features/caregivers/roster-data'
+import { liveBoard } from '@/features/monitoring/live-data'
 import type { BoardVisit } from '@/features/scheduling/board-data'
 import { referenceFor } from '@/features/scheduling/visit-detail'
 import { getMedicationPlan } from '@/features/care-recipients/medications-data'
@@ -39,6 +43,22 @@ export type ThreadKind = 'caregiver' | 'family'
  * cannot honestly be stamped "10:15 AM" — the thread prints the day alone and
  * says as much rather than inventing a minute.
  */
+/**
+ * A file sent with a message.
+ *
+ * Held as an object URL for the life of the tab — there is no server to put a
+ * file on, so the bytes stay in the browser that picked them. It opens and
+ * downloads for as long as this session lasts, and goes when the page does,
+ * which is the same bargain everything else this app writes makes.
+ */
+export interface Attachment {
+  name: string
+  /** Bytes, for the row to say how big it is without opening it. */
+  size: number
+  /** A blob: URL created when the file was picked. */
+  url: string
+}
+
 export interface Message {
   id: string
   /** ISO date. */
@@ -55,6 +75,7 @@ export interface Message {
    * message, not the message itself.
    */
   fromLog: boolean
+  attachment?: Attachment
 }
 
 /**
@@ -254,14 +275,32 @@ export function useMessageRevision(): number {
   return contacts + sent
 }
 
+/*
+ * Files picked in the composer, keyed by the id of the message they went with.
+ * Kept beside the messages rather than on them because a family message is
+ * rebuilt from the communication log on every read, and the log has room for a
+ * subject line and nothing else.
+ */
+const attachmentsByMessage = new Map<string, Attachment>()
+
 /**
  * Send from the signed-in coordinator. Returns nothing: the caller re-reads the
  * threads rather than being handed one, so the list, the folder counts and the
  * thread all rebuild from the same pass.
  */
-export function sendMessage(thread: Thread, body: string): void {
+export function sendMessage(
+  thread: Thread,
+  body: string,
+  attachment?: Attachment,
+): void {
   const text = body.trim()
-  if (text === '') return
+  if (text === '' && !attachment) return
+  /*
+   * A file sent on its own has no words. In a conversation that is fine — the
+   * file card is the message. The family log is text only, so there the
+   * subject falls back to the file's name, which is what the log can hold.
+   */
+  const subject = text === '' ? (attachment?.name ?? '') : text
 
   if (thread.kind === 'family') {
     const source = familySourceOf(thread.id)
@@ -271,11 +310,14 @@ export function sendMessage(thread: Thread, body: string): void {
       at: TODAY,
       memberId: source.memberId,
       type: 'App Message',
-      subject: text,
+      subject,
       staff: SIGNED_IN,
       direction: 'outbound',
     }
     logContact(source.recipientId, entry)
+    // The id familyThreads() will rebuild this message under.
+    if (attachment)
+      attachmentsByMessage.set(`${source.recipientId}-${entry.id}`, attachment)
     return
   }
 
@@ -293,6 +335,90 @@ export function sendMessage(thread: Thread, body: string): void {
     body: text,
     channel: 'App Message',
     fromLog: false,
+    attachment,
+  })
+  sentByThread.set(thread.id, list)
+  sentRevision += 1
+  for (const listener of sentListeners) listener()
+}
+
+/**
+ * Taking a file off a message.
+ *
+ * The message stays — somebody wrote it, and rewriting the record is not what
+ * deleting a file means. The file goes, and its object URL with it, so the
+ * browser stops holding the bytes. Only files sent this session can be
+ * removed, because those are the only ones this app holds at all.
+ */
+export function removeAttachment(messageId: string): boolean {
+  const held = attachmentsByMessage.get(messageId)
+  if (held) {
+    URL.revokeObjectURL(held.url)
+    attachmentsByMessage.delete(messageId)
+    sentRevision += 1
+    for (const listener of sentListeners) listener()
+    return true
+  }
+
+  for (const list of sentByThread.values()) {
+    const message = list.find((m) => m.id === messageId)
+    if (!message?.attachment) continue
+    URL.revokeObjectURL(message.attachment.url)
+    message.attachment = undefined
+    sentRevision += 1
+    for (const listener of sentListeners) listener()
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Record a call that happened.
+ *
+ * The design puts a video button beside the phone, and nothing in this app
+ * places a call of either kind — there is no dialler and no video service. But
+ * a call is a *contact*, and contacts are something this app very much keeps:
+ * a family one joins the communication log on the care record, the same list
+ * the Family tab reads, and a caregiver one joins the thread. So the button
+ * records the call rather than pretending to make it.
+ */
+export function logCall(
+  thread: Thread,
+  channel: 'Phone Call' | 'Video Call',
+  note: string,
+): void {
+  const subject =
+    note.trim() === '' ? `${channel} with ${thread.name}` : note.trim()
+
+  if (thread.kind === 'family') {
+    const source = familySourceOf(thread.id)
+    if (!source) return
+    logContact(source.recipientId, {
+      id: nextContactId(),
+      at: TODAY,
+      memberId: source.memberId,
+      type: channel,
+      subject,
+      staff: SIGNED_IN,
+      direction: 'outbound',
+    })
+    return
+  }
+
+  sentCount += 1
+  const list = sentByThread.get(thread.id) ?? []
+  list.push({
+    id: `call-${sentCount}`,
+    at: TODAY,
+    time: NOW,
+    direction: 'outbound',
+    author: SIGNED_IN,
+    body: subject,
+    channel,
+    // A record *of* a contact, not prose somebody typed — the thread renders
+    // these in the log's own voice.
+    fromLog: true,
   })
   sentByThread.set(thread.id, list)
   sentRevision += 1
@@ -370,19 +496,18 @@ function familyThreads(): Thread[] {
 
       const messages = entries
         .filter((e) => written.has(e.type))
-        .map(
-          (e): Message => ({
-            id: `${source.recipientId}-${e.id}`,
-            at: e.at,
-            // The log stores a day, not a clock.
-            time: null,
-            direction: e.direction,
-            author: e.direction === 'inbound' ? account.name : e.staff,
-            body: e.subject,
-            channel: e.type,
-            fromLog: true,
-          }),
-        )
+        .map((e): Message => ({
+          id: `${source.recipientId}-${e.id}`,
+          at: e.at,
+          // The log stores a day, not a clock.
+          time: null,
+          direction: e.direction,
+          author: e.direction === 'inbound' ? account.name : e.staff,
+          body: e.subject,
+          channel: e.type,
+          fromLog: true,
+          attachment: attachmentsByMessage.get(`${source.recipientId}-${e.id}`),
+        }))
 
       // A contact record with no written exchange in it is not a conversation;
       // it belongs on the Family tab's log, where it already is.
@@ -417,25 +542,23 @@ function familyThreads(): Thread[] {
 }
 
 function caregiverThreads(): Thread[] {
-  return caregiverSeeds.flatMap((seed): Thread[] => {
+  const seeded = caregiverSeeds.flatMap((seed): Thread[] => {
     const member: StaffMember | undefined = staffMembers.find(
       (m) => m.id === seed.caregiverId,
     )
     if (!member) return []
 
     const id = `${CAREGIVER_PREFIX}${seed.caregiverId}-${seed.recipientId}`
-    const seeded = seed.messages.map(
-      (m, i): Message => ({
-        id: `${id}-${i}`,
-        at: m.at,
-        time: m.time,
-        direction: m.direction,
-        author: m.direction === 'inbound' ? member.name : SIGNED_IN,
-        body: m.body,
-        channel: 'App Message',
-        fromLog: false,
-      }),
-    )
+    const messages = seed.messages.map((m, i): Message => ({
+      id: `${id}-${i}`,
+      at: m.at,
+      time: m.time,
+      direction: m.direction,
+      author: m.direction === 'inbound' ? member.name : SIGNED_IN,
+      body: m.body,
+      channel: 'App Message',
+      fromLog: false,
+    }))
 
     return [
       {
@@ -446,11 +569,105 @@ function caregiverThreads(): Thread[] {
         to: `/caregivers/${member.id}`,
         phone: member.phone,
         about: { id: seed.recipientId, name: recipientName(seed.recipientId) },
-        messages: [...seeded, ...(sentByThread.get(id) ?? [])],
+        messages: [...messages, ...(sentByThread.get(id) ?? [])],
         marks: [],
       },
     ]
   })
+
+  const started = [...startedCaregivers].flatMap((caregiverId): Thread[] => {
+    const member = staffMembers.find((m) => m.id === caregiverId)
+    if (!member) return []
+    const id = `${CAREGIVER_PREFIX}${caregiverId}-none`
+    if (seeded.some((t) => t.to === `/caregivers/${caregiverId}`)) return []
+    return [
+      {
+        id,
+        kind: 'caregiver',
+        name: member.name,
+        role: member.title,
+        to: `/caregivers/${member.id}`,
+        phone: member.phone,
+        about: null,
+        messages: [...(sentByThread.get(id) ?? [])],
+        marks: [],
+      },
+    ]
+  })
+
+  return [...seeded, ...started]
+}
+
+/**
+ * Conversations opened from the composer this session.
+ *
+ * A caregiver with nothing in the fixtures has no thread until somebody writes
+ * to them, and "New message" has to be able to reach anybody on the roster. The
+ * thread is empty until the first message lands in `sentByThread`, which is
+ * where the composer puts it.
+ */
+const startedCaregivers = new Set<string>()
+
+/** Opens one if it is not already there, and returns its id either way. */
+export function startCaregiverThread(caregiverId: string): string | null {
+  const member = staffMembers.find((m) => m.id === caregiverId)
+  if (!member) return null
+  const existing = caregiverThreads().find(
+    (t) => t.to === `/caregivers/${caregiverId}`,
+  )
+  if (existing) return existing.id
+  startedCaregivers.add(caregiverId)
+  sentRevision += 1
+  for (const listener of sentListeners) listener()
+  return `${CAREGIVER_PREFIX}${caregiverId}-none`
+}
+
+/** Everyone the composer can write to: the roster, plus family threads. */
+export function messageableCaregivers(): {
+  id: string
+  name: string
+  role: string
+}[] {
+  return staffMembers
+    .filter((m) => m.status === 'active')
+    .map((m) => ({ id: m.id, name: m.name, role: m.title }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Where this person stands on the roster: the design's green dot.
+ *
+ * "Online" is not something this app knows — nothing records a sign-in. What
+ * it does hold is the standing the roster keeps, the same word the caregiver's
+ * own record shows: active, on leave, or inactive. A family contact has no
+ * standing here at all, so they get no dot.
+ */
+export function threadStatus(
+  thread: Thread,
+): 'active' | 'on-leave' | 'inactive' | null {
+  if (thread.kind !== 'caregiver') return null
+  const caregiverId = thread.to.split('/')[2]
+  return staffMembers.find((m) => m.id === caregiverId)?.status ?? null
+}
+
+/**
+ * Whether this caregiver is out on a visit at this moment.
+ *
+ * The design puts a presence dot on the avatar. Nothing in this app records
+ * who is signed in, and inventing one would be the most believable lie on the
+ * screen — so the dot says the one thing the board can answer: the clock is
+ * inside one of their visits today. A family contact gets no dot; the agency
+ * has no idea where they are.
+ */
+export function onVisitNow(thread: Thread): boolean {
+  if (thread.kind !== 'caregiver') return false
+  const caregiverId = thread.to.split('/')[2]
+  return liveBoard().some(
+    (visit) =>
+      visit.caregiverId === caregiverId &&
+      visit.sinceStart >= 0 &&
+      visit.pastEnd < 0,
+  )
 }
 
 /** Every conversation the agency is holding, in no particular order. */
@@ -496,14 +713,15 @@ function activityKey(thread: Thread): string {
 export type ThreadSort = 'recent' | 'waiting' | 'name'
 
 export const sortOptions: { value: ThreadSort; label: string }[] = [
-  { value: 'recent', label: 'Most recent' },
-  { value: 'waiting', label: 'Longest waiting' },
+  { value: 'recent', label: 'Most Recent' },
+  { value: 'waiting', label: 'Longest Waiting' },
   { value: 'name', label: 'Name, A to Z' },
 ]
 
 export function sortThreads(list: Thread[], order: ThreadSort): Thread[] {
   const sorted = [...list]
-  if (order === 'name') return sorted.sort((a, b) => a.name.localeCompare(b.name))
+  if (order === 'name')
+    return sorted.sort((a, b) => a.name.localeCompare(b.name))
   if (order === 'waiting')
     return sorted.sort((a, b) => {
       // Threads nobody owes a reply to have no wait to measure, so they fall to
@@ -580,6 +798,36 @@ export function formatStamp(message: Message, today = TODAY): string {
   return clock ? `${date}, ${clock}` : date
 }
 
+/**
+ * "2m ago", "1h ago", "Yesterday" — the inbox's stamp.
+ *
+ * Measured off the app's own clock, the same one every other screen reads, so
+ * a message logged at 11:58 says two minutes rather than a time the reader has
+ * to subtract from. A record that holds only a day has no minutes to count, so
+ * it says the day.
+ */
+export function relativeStamp(
+  at: string,
+  time: string | null,
+  today = TODAY,
+  now = NOW,
+): string {
+  const days = daysBetween(at, today)
+  if (days === 0 && time) {
+    // minutesOfDay reads a 12-hour clock, which is what formatTime prints.
+    const minutes =
+      minutesOfDay(formatTime(now)) - minutesOfDay(formatTime(time))
+    // A stamp ahead of the app's clock is not in the future, it is now.
+    if (minutes < 1) return 'Just now'
+    if (minutes < 60) return `${minutes}m ago`
+    return `${Math.floor(minutes / 60)}h ago`
+  }
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days > 1 && days < 7) return `${days}d ago`
+  return dayLabel.format(new Date(`${at}T00:00:00Z`))
+}
+
 export function formatClock(time: string): string {
   return formatTime(time)
 }
@@ -602,6 +850,7 @@ export interface ThreadContext {
     reference: string
     date: string
     start: string
+    end: string
     type: string
     caregiverName: string | null
   } | null
@@ -655,6 +904,7 @@ export function threadContext(
           reference: referenceFor(visit),
           date: visit.date,
           start: visit.start,
+          end: visit.end,
           type: visit.type,
           caregiverName: visit.caregiverName,
         }

@@ -14,6 +14,7 @@ import { referenceFor } from '@/features/scheduling/visit-detail'
 import { SIGNED_IN, SIGNED_IN_ROLE } from '@/lib/session'
 import { formatTime, stateLabels } from './live-data'
 import type { LiveVisit } from './live-data'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 const severities: { value: IncidentSeverity; label: string }[] = [
   { value: 'critical', label: 'Critical' },
@@ -148,7 +149,7 @@ export function ReportIncidentDialog({
             <label htmlFor={typeId} className="text-ink text-sm font-medium">
               Incident type
             </label>
-            <select
+            <SelectBox
               id={typeId}
               value={type}
               onChange={(e) => setType(e.target.value as IncidentType)}
@@ -160,7 +161,7 @@ export function ReportIncidentDialog({
                   {incidentTypeLabels[value]}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
           <div>
             {/* "Severity", not the design's "Priority": it is the same axis the
@@ -169,7 +170,7 @@ export function ReportIncidentDialog({
             <label htmlFor={severityId} className="text-ink text-sm font-medium">
               Severity
             </label>
-            <select
+            <SelectBox
               id={severityId}
               value={severity}
               onChange={(e) => setSeverity(e.target.value as IncidentSeverity)}
@@ -181,7 +182,7 @@ export function ReportIncidentDialog({
                   {s.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
         </div>
 

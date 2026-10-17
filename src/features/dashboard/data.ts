@@ -49,6 +49,14 @@ export interface Alert {
   action: string
   /** Destructive actions get a red button. */
   destructive?: boolean
+  /**
+   * Where the button takes you: the screen where that job is done. Either a
+   * fixed path, or a visit to reassign — that one is looked up on the rota
+   * when clicked, because the visit's id carries today's date.
+   */
+  target:
+    | { kind: 'path'; to: string }
+    | { kind: 'reassign'; caregiver: string; recipient: string }
 }
 
 export interface ActivityEntry {
@@ -202,6 +210,7 @@ export const alerts: Alert[] = [
     detail: 'Sarah Williams 15min late for Margaret Johnson visit.',
     coordinator: 'Mike Chen',
     action: 'Reassign',
+    target: { kind: 'reassign', caregiver: 'Sarah Williams', recipient: 'Margaret Johnson' },
   },
   {
     id: 'a2',
@@ -211,6 +220,8 @@ export const alerts: Alert[] = [
     coordinator: 'Jane Smith',
     action: 'Contact',
     destructive: true,
+    // Opens the conversation with David Park, ready to type.
+    target: { kind: 'path', to: '/messages?with=caregiver:cg-002' },
   },
   {
     id: 'a3',
@@ -219,6 +230,8 @@ export const alerts: Alert[] = [
     detail: 'Maria Garcia CPR cert expires in 3 days.',
     coordinator: 'HR Team',
     action: 'Notify',
+    // Nothing sends a notification; this opens the credential on her record.
+    target: { kind: 'path', to: '/caregivers/cg-004/documents' },
   },
   {
     id: 'a4',
@@ -227,6 +240,7 @@ export const alerts: Alert[] = [
     detail: 'Dosage discrepancy flagged for Eleanor Davis.',
     coordinator: 'Clinical Team',
     action: 'Review',
+    target: { kind: 'path', to: '/care-recipients/cr-003/medications' },
   },
 ]
 

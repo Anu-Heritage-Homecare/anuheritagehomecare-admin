@@ -318,3 +318,30 @@ const records: Record<string, HealthRecord> = {
 export function getHealthRecord(recipientId: string): HealthRecord | undefined {
   return records[recipientId]
 }
+
+/** What Add Health Event offers, each with the badge and colour the timeline uses. */
+export const eventKinds: { id: string; label: string; category: EventCategory; badge: string; tone: Tone }[] = [
+  { id: 'vitals', label: 'Vitals reading', category: 'vitals', badge: 'Vitals', tone: 'green' },
+  { id: 'vitals-alert', label: 'Vitals alert', category: 'vitals', badge: 'Alert', tone: 'amber' },
+  { id: 'incident', label: 'Incident', category: 'incidents', badge: 'Incident', tone: 'red' },
+  { id: 'medication', label: 'Medication change', category: 'medication', badge: 'Medication', tone: 'blue' },
+  { id: 'assessment', label: 'Assessment', category: 'assessments', badge: 'Assessment', tone: 'purple' },
+  { id: 'appointment', label: 'Appointment', category: 'appointments', badge: 'Appointment', tone: 'blue' },
+]
+
+/**
+ * Adds an event from the Add Health Event page to the timeline. A recipient
+ * with no record gets one with just the timeline. Held in memory.
+ */
+export function addHealthEvent(recipientId: string, event: Omit<HealthEvent, 'id' | 'dateLabel'>): void {
+  const dateLabel = new Date(`${event.date}T00:00:00`).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  const record = records[recipientId] ?? { summary: [], vitals: [], events: [] }
+  records[recipientId] = {
+    ...record,
+    events: [{ ...event, id: `he-new-${Date.now().toString(36)}`, dateLabel }, ...record.events],
+  }
+}

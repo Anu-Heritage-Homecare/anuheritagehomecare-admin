@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { PhoneOutgoing, UsersRound } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import {
@@ -25,7 +25,18 @@ const summaryRoles: { role: FamilyRole; label: string; urgent?: boolean }[] = [
 export function FamilyTab() {
   const profile = useOutletContext<RecipientProfile>()
   const record = getFamilyRecord(profile.id)
-  const [contacting, setContacting] = useState(false)
+  // `?contact=1` arrives from the Caregivers tab's Contact Family button and
+  // opens the drawer straight away.
+  const [params, setParams] = useSearchParams()
+  const [contacting, setContacting] = useState(() => params.get('contact') === '1')
+  const stopContacting = () => {
+    setContacting(false)
+    if (params.has('contact')) {
+      const next = new URLSearchParams(params)
+      next.delete('contact')
+      setParams(next, { replace: true })
+    }
+  }
 
   if (!record) {
     return (
@@ -102,7 +113,7 @@ export function FamilyTab() {
         recipientName={profile.name}
         members={members}
         open={contacting}
-        onClose={() => setContacting(false)}
+        onClose={stopContacting}
       />
 
       <Panel title="Family Contacts Summary">

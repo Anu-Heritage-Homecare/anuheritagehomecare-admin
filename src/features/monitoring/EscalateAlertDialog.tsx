@@ -13,6 +13,7 @@ import {
   escalationTiers,
 } from './alert-actions'
 import type { EscalationReason } from './alert-actions'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 interface EscalateAlertDialogProps {
   alert: LiveAlert
@@ -153,7 +154,7 @@ export function EscalateAlertDialog({
               <label htmlFor={levelId} className="text-ink text-sm font-medium">
                 Escalation level
               </label>
-              <select
+              <SelectBox
                 id={levelId}
                 value={tier.title}
                 onChange={(e) => changeTier(e.target.value)}
@@ -164,14 +165,14 @@ export function EscalateAlertDialog({
                     {t.label}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </div>
 
             <div>
               <label htmlFor={assignId} className="text-ink text-sm font-medium">
                 Assign to
               </label>
-              <select
+              <SelectBox
                 id={assignId}
                 value={assignee.id}
                 onChange={(e) => setAssigneeId(e.target.value)}
@@ -182,7 +183,7 @@ export function EscalateAlertDialog({
                     {person.name} — {person.branch}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
               <p className="text-ink-subtle mt-1 text-xs">
                 {assignee.name} is on {assignee.phone}.{' '}
                 {ownCoordinator === assignee.name &&
@@ -194,7 +195,7 @@ export function EscalateAlertDialog({
               <label htmlFor={reasonId} className="text-ink text-sm font-medium">
                 Reason
               </label>
-              <select
+              <SelectBox
                 id={reasonId}
                 value={reason}
                 onChange={(e) => setReason(e.target.value as EscalationReason)}
@@ -208,7 +209,7 @@ export function EscalateAlertDialog({
                     {escalationReasonLabels[value]}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </div>
 
             <div>

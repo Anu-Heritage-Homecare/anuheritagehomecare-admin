@@ -20,6 +20,7 @@ import type {
 import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { cn } from '@/lib/cn'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 const dayNames: Record<string, string> = {
   Mon: 'Monday',
@@ -585,7 +586,7 @@ function HolidayRow({
         </p>
       </div>
       {/* The tag is the control: a native select drawn as the Figma's badge. */}
-      <select
+      <SelectBox
         id={id}
         value={holiday.policy}
         onChange={(e) => onChange(e.target.value as HolidayPolicy)}
@@ -599,7 +600,7 @@ function HolidayRow({
             {policyTags[p].label}
           </option>
         ))}
-      </select>
+      </SelectBox>
     </li>
   )
 }

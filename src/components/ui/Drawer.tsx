@@ -18,6 +18,11 @@ interface DrawerProps {
    * second component with its own half-right copy of all that.
    */
   placement?: 'side' | 'center'
+  /**
+   * Drop the title bar, for a confirmation that draws its own heading. The
+   * title still names the dialog for assistive tech, and Escape still closes.
+   */
+  bare?: boolean
   children: React.ReactNode
 }
 
@@ -34,6 +39,7 @@ export function Drawer({
   title,
   subtitle,
   placement = 'side',
+  bare = false,
   children,
 }: DrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -120,9 +126,19 @@ export function Drawer({
               'rounded-card inset-x-4 top-1/2 mx-auto max-h-[calc(100dvh-2rem)] w-auto max-w-lg -translate-y-1/2 border sm:inset-x-0',
         )}
       >
-        <div className="border-line flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+        {bare && (
+          <h2 id={headingId} className="sr-only">
+            {title}
+          </h2>
+        )}
+        <div
+          className={cn(
+            'border-line flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3',
+            bare && 'hidden',
+          )}
+        >
           <h2
-            id={headingId}
+            id={bare ? undefined : headingId}
             className="text-ink min-w-0 text-base font-semibold tracking-tight"
           >
             {title}

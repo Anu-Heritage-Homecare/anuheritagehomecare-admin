@@ -2,7 +2,8 @@ import { useId } from 'react'
 import { cn } from '@/lib/cn'
 
 interface ToggleProps {
-  label: string
+  /** Usually a string; nodes for a label that carries a chip beside its words. */
+  label: React.ReactNode
   checked: boolean
   onChange: (next: boolean) => void
   /** Rendered under the label and wired up with aria-describedby. */
@@ -18,6 +19,8 @@ interface ToggleProps {
   solidOff?: boolean
   /** Label styling override, e.g. weight or a muted colour. */
   labelClassName?: string
+  /** A switch that is fixed on (or off) and says so, rather than one that lies. */
+  disabled?: boolean
 }
 
 /**
@@ -39,6 +42,7 @@ export function Toggle({
   tone = 'brand',
   solidOff = false,
   labelClassName,
+  disabled = false,
 }: ToggleProps) {
   const id = useId()
   const hintId = `${id}-hint`
@@ -57,7 +61,10 @@ export function Toggle({
       <div className={cn('min-w-0', leading && 'order-2')}>
         <label
           htmlFor={id}
-          className={cn('text-ink block cursor-pointer text-sm break-words', labelClassName)}
+          className={cn(
+            'text-ink block cursor-pointer text-sm break-words',
+            labelClassName,
+          )}
         >
           {label}
         </label>
@@ -68,12 +75,18 @@ export function Toggle({
         )}
       </div>
 
-      <span className={cn('relative inline-flex shrink-0', leading ? 'order-1' : 'pt-0.5')}>
+      <span
+        className={cn(
+          'relative inline-flex shrink-0',
+          leading ? 'order-1' : 'pt-0.5',
+        )}
+      >
         <input
           id={id}
           type="checkbox"
           role="switch"
           checked={checked}
+          disabled={disabled}
           aria-describedby={described}
           onChange={(e) => onChange(e.target.checked)}
           className="peer sr-only"
@@ -82,7 +95,8 @@ export function Toggle({
           htmlFor={id}
           aria-hidden="true"
           className={cn(
-            'block h-6 w-11 cursor-pointer rounded-full border transition-colors',
+            'block h-6 w-11 rounded-full border transition-colors',
+            disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
             'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-600',
             checked
               ? tone === 'ink'

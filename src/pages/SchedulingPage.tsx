@@ -167,13 +167,13 @@ export function SchedulingPage() {
           >
             Assign Caregiver
           </Link>
-          <button
-            type="button"
+          <Link
+            to="/scheduling/visits/new"
             className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
           >
             <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
             Schedule Visit
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -350,9 +350,9 @@ function QuickOperations({ onPickVisit }: { onPickVisit: () => void }) {
         Quick Operations
       </h2>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-4">
-        {/* Same as the header's Schedule Visit — there is no create flow yet. */}
-        <button
-          type="button"
+        {/* Same destination as the header's Schedule Visit. */}
+        <Link
+          to="/scheduling/visits/new"
           className={cn(opCard, 'bg-brand-600 hover:bg-brand-700 border-transparent')}
         >
           <OpBody
@@ -362,7 +362,7 @@ function QuickOperations({ onPickVisit }: { onPickVisit: () => void }) {
             title="Schedule Visit"
             hint="Create a new client shift"
           />
-        </button>
+        </Link>
         <Link to="/scheduling?view=unassigned" className={secondary}>
           <OpBody
             icon={UserRound}

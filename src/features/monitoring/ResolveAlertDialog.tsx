@@ -8,6 +8,7 @@ import { alertKindLabels, alertTimingHints, formatTime } from './live-data'
 import type { LiveAlert } from './live-data'
 import { resolve, resolutionCategoryLabels } from './alert-actions'
 import type { ResolutionCategory } from './alert-actions'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 interface ResolveAlertDialogProps {
   alert: LiveAlert
@@ -118,7 +119,7 @@ export function ResolveAlertDialog({
           <label htmlFor={categoryId} className="text-ink text-sm font-medium">
             Resolution category
           </label>
-          <select
+          <SelectBox
             id={categoryId}
             value={category}
             onChange={(e) => setCategory(e.target.value as ResolutionCategory)}
@@ -132,7 +133,7 @@ export function ResolveAlertDialog({
                 </option>
               ),
             )}
-          </select>
+          </SelectBox>
         </div>
 
         <div>

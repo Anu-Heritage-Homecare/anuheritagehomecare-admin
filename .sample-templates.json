@@ -1,0 +1,19 @@
+{
+  "templates": [
+    {
+      "name": "Evening settle routine",
+      "description": "The last call of the day, in the order the care plans assume.",
+      "category": "paperwork",
+      "priority": "medium",
+      "cadence": "Usually on the last visit of the day",
+      "estimateMinutes": 30,
+      "items": [
+        "Evening medication against the chart",
+        "Help with washing and night clothes",
+        "Check the door and key safe",
+        "Write the visit up before leaving"
+      ]
+    },
+    { "name": "", "items": ["Broken row with no name"] }
+  ]
+}

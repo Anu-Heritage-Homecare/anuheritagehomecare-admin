@@ -1,4 +1,4 @@
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { ClipboardList } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import { getCarePlan } from '../care-plan-data'
@@ -24,12 +24,12 @@ export function CarePlanTab() {
           {profile.name} doesn't have an active care plan yet. Goals, daily
           schedule and care instructions appear here once one is created.
         </p>
-        <button
-          type="button"
+        <Link
+          to={`/care-recipients/${profile.id}/care-plan/edit`}
           className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
         >
           Create Care Plan
-        </button>
+        </Link>
       </div>
     )
   }

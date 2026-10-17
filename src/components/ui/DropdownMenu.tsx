@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { MoreHorizontal } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 export interface MenuItem {
@@ -17,6 +25,17 @@ interface DropdownMenuProps {
   /** Accessible name for the trigger, e.g. "Actions for Margaret Johnson". */
   label: string
   items: MenuItem[]
+  /**
+   * Outlines the trigger, for a menu that sits in a row of outlined buttons
+   * rather than at the end of a table row.
+   */
+  bordered?: boolean
+  /** A different glyph on the trigger, where the menu is not an overflow. */
+  icon?: LucideIcon
+  /** Replaces the trigger's own classes, for a menu that has to match a row of buttons. */
+  triggerClassName?: string
+  /** Which edge the panel lines up with. Right by default, where overflow menus sit. */
+  align?: 'start' | 'end'
 }
 
 const WIDTH = 224
@@ -31,7 +50,14 @@ const MARGIN = 8
  * `overflow-x-auto` scroll regions and `overflow-hidden` cards, both of which
  * clip an absolutely positioned child — the last row's menu simply vanished.
  */
-export function DropdownMenu({ label, items }: DropdownMenuProps) {
+export function DropdownMenu({
+  label,
+  items,
+  bordered = false,
+  icon: Icon = MoreHorizontal,
+  triggerClassName,
+  align = 'end',
+}: DropdownMenuProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -48,11 +74,11 @@ export function DropdownMenu({ label, items }: DropdownMenuProps) {
     setPosition({
       top: below ? rect.bottom + 4 : Math.max(MARGIN, rect.top - height - 4),
       left: Math.min(
-        Math.max(MARGIN, rect.right - WIDTH),
+        Math.max(MARGIN, align === 'start' ? rect.left : rect.right - WIDTH),
         window.innerWidth - WIDTH - MARGIN,
       ),
     })
-  }, [items.length])
+  }, [align, items.length])
 
   useLayoutEffect(() => {
     if (open) place()
@@ -110,9 +136,15 @@ export function DropdownMenu({ label, items }: DropdownMenuProps) {
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((v) => !v)}
-        className="text-ink-subtle hover:bg-sunken hover:text-ink grid size-9 shrink-0 place-items-center rounded-lg"
+        className={
+          triggerClassName ??
+          cn(
+            'text-ink-subtle hover:bg-sunken hover:text-ink grid size-9 shrink-0 place-items-center rounded-lg',
+            bordered && 'border-line border',
+          )
+        }
       >
-        <MoreHorizontal className="size-4.5" />
+        <Icon className="size-4.5" strokeWidth={1.9} />
       </button>
 
       {open &&

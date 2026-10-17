@@ -65,10 +65,12 @@ export function TodaysSchedule() {
                 aria-pressed={filter === id}
                 onClick={() => setFilter(id)}
                 className={cn(
-                  'min-h-11 shrink-0 rounded-full px-3.5 text-sm font-medium transition-colors lg:min-h-9',
+                  // Every pill is outlined, as the design draws them: white
+                  // when idle, tinted when chosen.
+                  'border-line min-h-11 shrink-0 rounded-full border px-4 text-sm font-semibold transition-colors lg:min-h-9',
                   filter === id
                     ? 'bg-brand-50 text-brand-700'
-                    : 'text-ink-muted hover:bg-sunken',
+                    : 'bg-surface text-ink-muted hover:bg-sunken hover:text-ink',
                 )}
               >
                 {label}

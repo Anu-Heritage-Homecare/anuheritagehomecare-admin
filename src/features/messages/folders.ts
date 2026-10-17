@@ -1,56 +1,63 @@
 import {
-  Bell,
   ClipboardCheck,
+  Folder as FolderIcon,
+  FolderInput,
+  FolderOpen,
   Heart,
-  Inbox,
-  Reply,
+  Megaphone,
   UserRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { awaitingReply } from './data'
+import { lastMessage } from './data'
 import type { Thread } from './data'
+import { TODAY } from '@/lib/today'
 import type { Notice } from './notices'
+import { isRead } from './read-state'
+import { hasLeft, isArchived, isMuted } from './flags'
+import { messageSettings } from './settings'
 
 /**
  * The rail.
  *
- * Two groups, not one list. The first four are conversations somebody is on the
- * other end of; the last two are records and broadcasts, which can be read and
- * opened and nothing else. Filing them as six equal folders is what let the
- * source design put a reply box under a check-in confirmation.
+ * One flat list, and every folder is a real cut of the same inbox: All is
+ * everything, Direct is the conversations somebody is on the other end of, and
+ * Visits and Announcements are the records and broadcasts that arrive
+ * alongside them and cannot be replied to. All = Direct + Visits +
+ * Announcements, so the counts add up rather than overlapping.
  */
 export type Folder =
   | 'all'
-  | 'awaiting'
+  | 'unread'
+  | 'direct'
   | 'caregivers'
   | 'families'
   | 'visits'
   | 'announcements'
 
-export const conversationFolders: Folder[] = [
+export const folderOrder: Folder[] = [
   'all',
-  'awaiting',
+  'unread',
+  'direct',
   'caregivers',
   'families',
+  'visits',
+  'announcements',
 ]
 
-export const noticeFolders: Folder[] = ['visits', 'announcements']
-
 export const folderLabels: Record<Folder, string> = {
-  all: 'All conversations',
-  // Not "Unread". Nothing in this app records that anybody has read a message,
-  // so the count is of messages waiting on a reply — the same walk the families
-  // directory calls an unanswered message.
-  awaiting: 'Needs a reply',
+  all: 'All',
+  unread: 'Unread',
+  direct: 'Direct',
   caregivers: 'Caregivers',
   families: 'Families',
-  visits: 'Visit records',
+  visits: 'Visits',
   announcements: 'Announcements',
 }
 
 export const folderHints: Record<Folder, string> = {
-  all: 'Every conversation with a caregiver or a family contact.',
-  awaiting: 'Threads whose last message came in and has had no answer since.',
+  all: 'Every conversation, visit record and announcement.',
+  unread: 'Anything nobody has opened yet this session.',
+  direct: 'Conversations with a caregiver or a family contact.',
   caregivers: 'Staff on the roster.',
   families: 'Family contacts, reading the same log as each care record.',
   visits: 'Visit records filed in the last seven days. Read-only.',
@@ -58,43 +65,81 @@ export const folderHints: Record<Folder, string> = {
 }
 
 export const folderIcons: Record<Folder, LucideIcon> = {
-  all: Inbox,
-  awaiting: Reply,
+  all: FolderIcon,
+  unread: FolderOpen,
+  direct: FolderInput,
   caregivers: UserRound,
   families: Heart,
   visits: ClipboardCheck,
-  announcements: Bell,
+  announcements: Megaphone,
 }
 
+/** Folders that hold no conversation, so the list offers no sort. */
 export function isNoticeFolder(folder: Folder): boolean {
   return folder === 'visits' || folder === 'announcements'
 }
 
-const all: Folder[] = [...conversationFolders, ...noticeFolders]
-
 /** Falls back to the inbox rather than 404ing on a hand-edited query string. */
 export function readFolder(value: string | null): Folder {
-  return all.includes(value as Folder) ? (value as Folder) : 'all'
+  return folderOrder.includes(value as Folder) ? (value as Folder) : 'all'
 }
 
 export function threadsIn(folder: Folder, list: Thread[]): Thread[] {
+  // Archived is out of every folder. Not deleted — the thread keeps its URL,
+  // and the conversation's own panel is where it comes back from.
+  list = list.filter((t) => !isArchived(t.id) && !hasLeft(t.id) && !agedOut(t))
   switch (folder) {
-    case 'awaiting':
-      return list.filter((t) => awaitingReply(t) > 0)
+    case 'unread':
+      // Muted stays in the folders and out of the chasing.
+      return list.filter((t) => !isRead(t.id) && !isMuted(t.id))
     case 'caregivers':
       return list.filter((t) => t.kind === 'caregiver')
     case 'families':
       return list.filter((t) => t.kind === 'family')
+    case 'visits':
+    case 'announcements':
+      return []
     default:
+      // All and Direct: every conversation is one-to-one with somebody, as
+      // against the records and broadcasts below them.
       return list
   }
 }
 
+const DAY_MS = 86_400_000
+
+/**
+ * The auto-archive rule from Message Settings, applied where it belongs: a
+ * conversation nobody has written in for longer than the setting allows drops
+ * out of the folders, exactly as archiving it by hand would. Nothing is
+ * deleted and the thread keeps its own link — the rule is read as the folder
+ * is built, so moving the setting puts the conversations straight back.
+ */
+function agedOut(thread: Thread): boolean {
+  const days = messageSettings().archiveAfterDays
+  if (days <= 0) return false
+  const last = lastMessage(thread)
+  if (!last) return false
+  const age =
+    (new Date(`${TODAY}T00:00:00Z`).getTime() -
+      new Date(`${last.at}T00:00:00Z`).getTime()) /
+    DAY_MS
+  return age > days
+}
+
 export function noticesIn(folder: Folder, list: Notice[]): Notice[] {
-  if (folder === 'visits') return list.filter((n) => n.kind === 'visit')
-  if (folder === 'announcements')
-    return list.filter((n) => n.kind === 'announcement')
-  return []
+  switch (folder) {
+    case 'visits':
+      return list.filter((n) => n.kind === 'visit')
+    case 'announcements':
+      return list.filter((n) => n.kind === 'announcement')
+    case 'all':
+      return list
+    case 'unread':
+      return list.filter((n) => !isRead(n.id))
+    default:
+      return []
+  }
 }
 
 /**
@@ -106,8 +151,10 @@ export function folderCounts(
   notices: Notice[],
 ): Record<Folder, number> {
   return {
-    all: threads.length,
-    awaiting: threadsIn('awaiting', threads).length,
+    all: threads.length + notices.length,
+    unread:
+      threadsIn('unread', threads).length + noticesIn('unread', notices).length,
+    direct: threads.length,
     caregivers: threadsIn('caregivers', threads).length,
     families: threadsIn('families', threads).length,
     visits: noticesIn('visits', notices).length,

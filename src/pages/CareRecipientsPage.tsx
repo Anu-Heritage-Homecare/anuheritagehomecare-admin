@@ -12,6 +12,7 @@ import {
 } from '@/features/care-recipients/DirectoryToolbar'
 import { RecipientTable } from '@/features/care-recipients/RecipientTable'
 import { FooterPanels } from '@/features/care-recipients/FooterPanels'
+import { AddRecipientDrawer } from '@/features/care-recipients/AddRecipientDrawer'
 import { Pagination } from '@/components/ui/Pagination'
 import type { Recipient } from '@/features/care-recipients/data'
 
@@ -42,10 +43,13 @@ export function CareRecipientsPage() {
   const [filter, setFilter] = useState<DirectoryFilter>('all')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
+  const [adding, setAdding] = useState(false)
+  // A snapshot of the shared list, replaced when a recipient is added.
+  const [all, setAll] = useState(recipients)
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return recipients.filter((r) => {
+    return all.filter((r) => {
       if (!predicates[filter](r)) return false
       if (!q) return true
       return [r.name, r.ref, r.condition, r.caregiver ?? '']
@@ -53,7 +57,7 @@ export function CareRecipientsPage() {
         .toLowerCase()
         .includes(q)
     })
-  }, [filter, query])
+  }, [all, filter, query])
 
   const filtering = filter !== 'all' || query.trim() !== ''
 
@@ -103,6 +107,7 @@ export function CareRecipientsPage() {
           </button>
           <button
             type="button"
+            onClick={() => setAdding(true)}
             className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium text-white transition-colors"
           >
             <Plus className="size-4" strokeWidth={2.2} />
@@ -110,6 +115,18 @@ export function CareRecipientsPage() {
           </button>
         </div>
       </header>
+
+      <AddRecipientDrawer
+        open={adding}
+        onClose={(recipient) => {
+          setAdding(false)
+          if (recipient) {
+            // New recipients go to the top; show the first page so it is seen.
+            setAll([...recipients])
+            setPage(1)
+          }
+        }}
+      />
 
       <SummaryCards />
 

@@ -1,4 +1,4 @@
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { HeartPulse } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import { getHealthRecord } from '../health-data'
@@ -23,12 +23,12 @@ export function HealthTab() {
           {profile.name} has no recorded vitals or health events yet. Trends and
           the event timeline appear here once readings are logged.
         </p>
-        <button
-          type="button"
+        <Link
+          to={`/care-recipients/${profile.id}/health/new`}
           className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
         >
           Add Health Event
-        </button>
+        </Link>
       </div>
     )
   }

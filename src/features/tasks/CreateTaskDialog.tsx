@@ -14,6 +14,7 @@ import {
   offeredCategories,
 } from './data'
 import type { AgencyTask, TaskCategory, TaskPriority } from './data'
+import { SelectBox } from '@/components/ui/SelectBox'
 
 interface Draft {
   title: string
@@ -23,6 +24,7 @@ interface Draft {
   assignee: string
   recipientId: string
   due: string
+  dueTime: string
   estimate: string
 }
 
@@ -41,6 +43,7 @@ function blank(): Draft {
     assignee: defaultAssigneeFor(category) ?? SIGNED_IN,
     recipientId: '',
     due: TODAY,
+    dueTime: '',
     estimate: '',
   }
 }
@@ -71,6 +74,7 @@ export function CreateTaskDialog({ onClose }: { onClose: () => void }) {
           assignee: draft.assignee,
           recipientId: draft.recipientId === '' ? null : draft.recipientId,
           due: draft.due === '' ? null : draft.due,
+          dueTime: draft.due === '' || draft.dueTime === '' ? null : draft.dueTime,
           estimateMinutes: draft.estimate === '' ? null : Number(draft.estimate),
         })
       }}
@@ -105,6 +109,7 @@ export function EditTaskDialog({
         assignee: task.assignee ?? SIGNED_IN,
         recipientId: task.recipientId ?? '',
         due: task.due ?? '',
+        dueTime: task.dueTime ?? '',
         estimate: task.estimateMinutes != null ? String(task.estimateMinutes) : '',
       }}
       onSubmit={(draft) => {
@@ -116,6 +121,7 @@ export function EditTaskDialog({
           assignee: draft.assignee,
           recipientId: draft.recipientId === '' ? null : draft.recipientId,
           due: draft.due === '' ? null : draft.due,
+          dueTime: draft.due === '' || draft.dueTime === '' ? null : draft.dueTime,
           estimate: draft.estimate === '' ? null : Number(draft.estimate),
         })
       }}
@@ -155,6 +161,7 @@ function TaskDialog({
   const assigneeId = useId()
   const clientId = useId()
   const dueId = useId()
+  const dueTimeId = useId()
   const estimateId = useId()
 
   const names = assignableNames()
@@ -196,7 +203,7 @@ function TaskDialog({
             <label htmlFor={categoryId} className="text-ink text-sm font-medium">
               Category
             </label>
-            <select
+            <SelectBox
               id={categoryId}
               value={draft.category}
               onChange={(e) => {
@@ -215,13 +222,13 @@ function TaskDialog({
                   {c.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
           <div>
             <label htmlFor={priorityId} className="text-ink text-sm font-medium">
               Priority
             </label>
-            <select
+            <SelectBox
               id={priorityId}
               value={draft.priority}
               onChange={(e) => set('priority', e.target.value as TaskPriority)}
@@ -232,7 +239,7 @@ function TaskDialog({
                   {priorityLabel(p)}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
         </div>
 
@@ -241,7 +248,7 @@ function TaskDialog({
             <label htmlFor={assigneeId} className="text-ink text-sm font-medium">
               Assign to
             </label>
-            <select
+            <SelectBox
               id={assigneeId}
               value={draft.assignee}
               onChange={(e) => set('assignee', e.target.value)}
@@ -252,7 +259,7 @@ function TaskDialog({
                   {name}
                 </option>
               ))}
-            </select>
+            </SelectBox>
             {/* A select, not free text: a task cannot be put on somebody who
                 does not work here. */}
             <p className="text-ink-subtle mt-1 text-xs">
@@ -274,6 +281,22 @@ function TaskDialog({
               Clear it for a task with no deadline.
             </p>
           </div>
+          <div>
+            <label htmlFor={dueTimeId} className="text-ink text-sm font-medium">
+              Time <span className="text-ink-subtle font-normal">(optional)</span>
+            </label>
+            <input
+              id={dueTimeId}
+              type="time"
+              value={draft.dueTime}
+              onChange={(e) => set('dueTime', e.target.value)}
+              disabled={draft.due === ''}
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm disabled:cursor-not-allowed disabled:opacity-55"
+            />
+            <p className="text-ink-subtle mt-1 text-xs">
+              An hour to have it done by, where one matters.
+            </p>
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -281,7 +304,7 @@ function TaskDialog({
             <label htmlFor={clientId} className="text-ink text-sm font-medium">
               Client <span className="text-ink-subtle font-normal">(optional)</span>
             </label>
-            <select
+            <SelectBox
               id={clientId}
               value={draft.recipientId}
               onChange={(e) => set('recipientId', e.target.value)}
@@ -293,7 +316,7 @@ function TaskDialog({
                   {r.name}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
           <div>
             <label htmlFor={estimateId} className="text-ink text-sm font-medium">

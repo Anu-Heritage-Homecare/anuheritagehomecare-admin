@@ -36,7 +36,10 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-function MemberCard({ member }: { member: TeamMember }) {
+function MemberCard({ member, recipientId }: { member: TeamMember; recipientId: string }) {
+  const staff = staffByName(member.name)
+  // Messages can start a conversation with active staff only.
+  const canMessage = staff?.status === 'active'
   return (
     <li
       className={cn(
@@ -139,19 +142,33 @@ function MemberCard({ member }: { member: TeamMember }) {
 
       <div className="border-line mt-4 space-y-2 border-t pt-4">
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-sm font-medium transition-colors"
-          >
-            <MessageSquare className="size-4" strokeWidth={1.9} aria-hidden="true" />
-            Message
-          </button>
-          <button
-            type="button"
+          {canMessage ? (
+            <Link
+              to={`/messages?with=caregiver:${staff.id}`}
+              className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-sm font-medium transition-colors"
+            >
+              <MessageSquare className="size-4" strokeWidth={1.9} aria-hidden="true" />
+              Message
+              <span className="sr-only"> {member.name}</span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              title={`${member.name} isn't an active staff member, so there's no inbox to message.`}
+              className="border-control text-ink inline-flex h-10 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border text-sm font-medium opacity-50"
+            >
+              <MessageSquare className="size-4" strokeWidth={1.9} aria-hidden="true" />
+              Message
+            </button>
+          )}
+          <Link
+            to={`/care-recipients/${recipientId}/caregivers/${member.id}/reassign`}
             className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center justify-center rounded-lg border text-sm font-medium transition-colors"
           >
             Reassign
-          </button>
+            <span className="sr-only"> {member.name}</span>
+          </Link>
         </div>
         {/* The staff record, not the roster — nine cards promising nine
             different profiles all landed on the same list. */}
@@ -171,7 +188,7 @@ function MemberCard({ member }: { member: TeamMember }) {
   )
 }
 
-export function CareTeamCards({ team }: { team: TeamMember[] }) {
+export function CareTeamCards({ team, recipientId }: { team: TeamMember[]; recipientId: string }) {
   return (
     <section aria-labelledby="primary-care-team">
       <h2
@@ -183,7 +200,7 @@ export function CareTeamCards({ team }: { team: TeamMember[] }) {
 
       <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {team.map((m) => (
-          <MemberCard key={m.id} member={m} />
+          <MemberCard key={m.id} member={m} recipientId={recipientId} />
         ))}
       </ul>
     </section>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { PillBottle } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import {
@@ -38,12 +38,12 @@ export function MedicationsTab() {
           {profile.name} has no active prescriptions recorded. Dosing schedule
           and interaction warnings appear here once medications are added.
         </p>
-        <button
-          type="button"
+        <Link
+          to={`/care-recipients/${profile.id}/medications/new`}
           className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
         >
           Add Medication
-        </button>
+        </Link>
       </div>
     )
   }
