@@ -3,7 +3,9 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { RouteFallback } from '@/components/layout/RouteFallback'
 import { RouteError } from '@/components/layout/RouteError'
 import { AdminLayout } from '@/components/layout/AdminLayout'
+import { RequireAuth } from '@/components/layout/RequireAuth'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
 /*
@@ -20,6 +22,12 @@ const lazyRoute =
   async () => ({ Component: (await load())[name] })
 
 export const router = createBrowserRouter([
+  {
+    // Sign in, full-screen and outside the authenticated shell.
+    path: '/login',
+    element: <LoginPage />,
+    errorElement: <RouteError />,
+  },
   /*
    * The invoice wizard is full-screen, outside the admin shell, as the design
    * draws it. A static path, so it outranks billing/invoices/:number.
@@ -32,7 +40,11 @@ export const router = createBrowserRouter([
   },
   {
     path: '/',
-    element: <AdminLayout />,
+    element: (
+      <RequireAuth>
+        <AdminLayout />
+      </RequireAuth>
+    ),
     // Without this the shell renders null while a lazy chunk loads, so a cold
     // deep link is a blank page rather than a skeleton.
     HydrateFallback: RouteFallback,
