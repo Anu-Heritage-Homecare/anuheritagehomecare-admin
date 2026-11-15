@@ -9,6 +9,7 @@ import {
   CreditCard,
   Download,
   FilePlus,
+  Loader2,
   SquareCheck,
   Star,
   TriangleAlert,
@@ -18,9 +19,8 @@ import {
   formatCompact,
   formatDate,
   formatMoney,
-  revenueMonths,
-  revenueOverWindow,
 } from '@/features/billing/data'
+import { usePlansBilling } from '@/features/billing/usePlansBilling'
 import {
   agingBuckets,
   billingActivity,
@@ -87,7 +87,8 @@ const outlineButton =
 export function PlansBillingPage() {
   useBook()
   const [paying, setPaying] = useState(false)
-  const revenue = revenueOverWindow(TREND_MONTHS)
+  // The market defaults to USD, the backend default for plans and billing.
+  const { data, isPending, isError, error, refetch } = usePlansBilling('USD')
   const open = openInvoices()
   const overdue = overdueInvoices()
   const monthPayments = paymentsThisMonth()
@@ -95,7 +96,7 @@ export function PlansBillingPage() {
   const recent = settledPayments().slice(0, RECENT_PAYMENTS)
   const activity = billingActivity()
 
-  const revenueBadge = signed(revenue.change, '%')
+  const revenueBadge = signed(data?.monthlyGrowthPercent ?? 0, '%')
   const collectionBadge = signed(collectionRateDelta(), '%')
 
   /*
@@ -114,9 +115,9 @@ export function PlansBillingPage() {
   }[] = [
     {
       id: 'revenue',
-      label: 'Total Revenue',
-      value: formatMoney(revenue.total),
-      badge: { ...revenueBadge, sr: `${revenueBadge.sr} on the previous ${TREND_MONTHS} months` },
+      label: 'Monthly Revenue',
+      value: data?.revenueLabel ?? formatMoney(0),
+      badge: { ...revenueBadge, sr: `${revenueBadge.sr} on the previous month` },
       icon: CreditCard,
       tone: 'green',
     },
@@ -184,6 +185,25 @@ export function PlansBillingPage() {
       </header>
       <RecordPaymentDrawer open={paying} onClose={() => setPaying(false)} />
 
+      {isPending && (
+        <div className="text-ink-subtle flex items-center gap-2 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading the live revenue overview…
+        </div>
+      )}
+      {isError && (
+        <div className="card flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+          <p className="text-ink">Could not load the revenue overview: {error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-9 rounded-lg px-3 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       <section aria-labelledby="billing-kpis">
         <h2 id="billing-kpis" className="sr-only">
           Key figures
@@ -229,7 +249,7 @@ export function PlansBillingPage() {
         >
           <div className="pt-2">
             <LineChart
-              points={revenueMonths(TREND_MONTHS)}
+              points={data?.revenuePoints ?? []}
               formatTick={formatCompact}
               formatValue={formatMoney}
               caption="Monthly revenue, oldest first"

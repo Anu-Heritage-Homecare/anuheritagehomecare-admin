@@ -1,16 +1,15 @@
 import { useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import {
-  setMethod,
-  setNotify,
-  termsOptions,
-  update,
   useBillingSettings,
-  validPrefix,
-} from '@/features/billing/settings'
+  useUpdateBillingSettings,
+  useUpdatePaymentMethod,
+} from '@/features/billing/useBillingSettings'
+import { termsOptions, validPrefix } from '@/features/billing/settings'
+import type { BillingSettings as BillingSettingsData, MethodId, PaymentMethodSetting } from '@/features/billing/settings'
 import { Panel } from '@/components/ui/Panel'
 import { Toggle } from '@/components/ui/Toggle'
 import { Drawer } from '@/components/ui/Drawer'
-import type { MethodId, PaymentMethodSetting } from '@/features/billing/settings'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
 
@@ -33,7 +32,38 @@ function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor: stri
 }
 
 export function BillingSettingsPage() {
-  const s = useBillingSettings()
+  const { data: s, isPending, isError, error, refetch } = useBillingSettings()
+
+  if (isPending) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading billing settings…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load billing settings.</p>
+        <p className="text-ink-subtle text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  return <BillingSettings settings={s} />
+}
+
+function BillingSettings({ settings: s }: { settings: BillingSettingsData }) {
+  const save = useUpdateBillingSettings()
   // Typed values are held locally and committed only when valid, so a
   // half-typed prefix never becomes the setting.
   const [prefix, setPrefix] = useState(s.invoicePrefix)
@@ -60,7 +90,7 @@ export function BillingSettingsPage() {
                 <SelectBox
                   id="terms"
                   value={s.paymentTermsDays}
-                  onChange={(e) => update({ paymentTermsDays: Number(e.target.value) })}
+                  onChange={(e) => save.mutate({ paymentTermsDays: Number(e.target.value) })}
                   className={fieldClass}
                 >
                   {termsOptions.map((d) => (
@@ -78,7 +108,7 @@ export function BillingSettingsPage() {
                   value={prefix}
                   onChange={(e) => {
                     setPrefix(e.target.value)
-                    if (validPrefix(e.target.value)) update({ invoicePrefix: e.target.value })
+                    if (validPrefix(e.target.value)) save.mutate({ invoicePrefix: e.target.value })
                   }}
                   aria-invalid={!prefixOk}
                   aria-describedby={prefixOk ? undefined : 'prefix-hint'}
@@ -109,7 +139,7 @@ export function BillingSettingsPage() {
                   onChange={(e) => {
                     setTax(e.target.value)
                     const v = parseTax(e.target.value)
-                    if (v !== null) update({ taxRatePercent: v })
+                    if (v !== null) save.mutate({ standardTaxRatePercent: v })
                   }}
                   aria-invalid={!taxOk}
                   aria-describedby={taxOk ? undefined : 'tax-hint'}
@@ -126,7 +156,7 @@ export function BillingSettingsPage() {
                 label="Auto-numbering"
                 hint="Automatically increment invoice numbers"
                 checked={s.autoNumbering}
-                onChange={(v) => update({ autoNumbering: v })}
+                onChange={(v) => save.mutate({ autoNumbering: v })}
                 labelClassName="font-medium"
               />
             </div>
@@ -138,28 +168,28 @@ export function BillingSettingsPage() {
                 label="Auto-send invoices"
                 hint="Email invoice immediately upon creation"
                 checked={s.autoSendInvoices}
-                onChange={(v) => update({ autoSendInvoices: v })}
+                onChange={(v) => save.mutate({ autoSendInvoices: v })}
                 labelClassName="font-medium"
               />
               <Toggle
                 label="Payment reminders"
                 hint="Send automatic reminder 7 days before due date"
                 checked={s.paymentReminders}
-                onChange={(v) => update({ paymentReminders: v })}
+                onChange={(v) => save.mutate({ paymentReminders: v })}
                 labelClassName="font-medium"
               />
               <Toggle
                 label="Overdue notifications"
                 hint="Notify family 1 day after invoice becomes overdue"
                 checked={s.overdueNotifications}
-                onChange={(v) => update({ overdueNotifications: v })}
+                onChange={(v) => save.mutate({ overdueNotifications: v })}
                 labelClassName="font-medium"
               />
               <Toggle
                 label="Auto-receipts"
                 hint="Generate and email receipt on payment confirmation"
                 checked={s.autoReceipts}
-                onChange={(v) => update({ autoReceipts: v })}
+                onChange={(v) => save.mutate({ autoReceipts: v })}
                 labelClassName="font-medium"
               />
             </div>
@@ -199,21 +229,21 @@ export function BillingSettingsPage() {
                 label="Email notifications"
                 hint="Send full billing statements and alerts"
                 checked={s.notify.email}
-                onChange={(v) => setNotify('email', v)}
+                onChange={(v) => save.mutate({ emailNotifications: v })}
                 labelClassName="font-medium"
               />
               <Toggle
                 label="SMS notifications"
                 hint="Send critical overdue alerts via SMS"
                 checked={s.notify.sms}
-                onChange={(v) => setNotify('sms', v)}
+                onChange={(v) => save.mutate({ smsNotifications: v })}
                 labelClassName="font-medium"
               />
               <Toggle
                 label="In-app notifications"
                 hint="Show activity stream flags inside console"
                 checked={s.notify.inApp}
-                onChange={(v) => setNotify('inApp', v)}
+                onChange={(v) => save.mutate({ inAppNotifications: v })}
                 labelClassName="font-medium"
               />
             </div>
@@ -238,6 +268,7 @@ export function BillingSettingsPage() {
 
 /** Local draft; nothing changes until Save. */
 function MethodForm({ method, onDone }: { method: PaymentMethodSetting; onDone: () => void }) {
+  const save = useUpdatePaymentMethod()
   const [enabled, setEnabled] = useState(method.enabled)
   const [detail, setDetail] = useState(method.detail)
   const valid = detail.trim().length > 0
@@ -248,8 +279,10 @@ function MethodForm({ method, onDone }: { method: PaymentMethodSetting; onDone: 
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        setMethod(method.id, { enabled, detail: detail.trim() })
-        onDone()
+        save.mutate(
+          { id: method.id, enabled, description: detail.trim() },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Toggle
@@ -282,7 +315,7 @@ function MethodForm({ method, onDone }: { method: PaymentMethodSetting; onDone: 
         </button>
         <button
           type="submit"
-          disabled={!valid}
+          disabled={!valid || save.isPending}
           className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
         >
           Save
