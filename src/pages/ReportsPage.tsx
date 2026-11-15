@@ -1,26 +1,16 @@
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
-import { ChartNoAxesColumn, Plus } from 'lucide-react'
+import { ChartNoAxesColumn, Loader2, Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { formatCompact, formatMoney } from '@/features/billing/data'
 import {
-  dailyVisits,
-  financialSummary,
   formatShortDate,
-  monthToDate,
-  monthlyTrend,
-  rangeDays,
-  reportActivity,
   reportRanges,
   reportTabs,
-  revenueOverview,
-  satisfaction,
-  utilisation,
-  visitFigures,
-  workforce,
 } from '@/features/reports/data'
-import type { ReportRange, ReportTab } from '@/features/reports/data'
+import type { ReportRange } from '@/features/reports/data'
+import { buildOverviewCsv, useReportsOverview } from '@/features/reports/useReportsOverview'
+import type { ReportsOverviewView } from '@/features/reports/useReportsOverview'
 import { SelectFilter } from '@/components/ui/SelectFilter'
-import { Sparkline } from '@/components/ui/Sparkline'
 import { cn } from '@/lib/cn'
 
 function pick<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
@@ -31,10 +21,6 @@ const outlineButton =
   'border-control text-ink hover:bg-sunken bg-surface inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors'
 
 const pctText = (n: number | null) => (n === null ? '—' : `${n}%`)
-
-function csvField(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
-}
 
 /* --------------------------------- pieces --------------------------------- */
 
@@ -133,41 +119,13 @@ const starBar: Record<number, string> = {
   1: 'bg-red-500',
 }
 
-/* ---------------------------------- page ---------------------------------- */
+/* ------------------------------- the report ------------------------------- */
 
-export function ReportsPage() {
-  const [params, setParams] = useSearchParams()
-  /* Operations, Workforce and Financial are pages of their own (/reports/…),
-     not filtered views of this one; an old ?tab= link is sent on to its page. */
-  const asked = pick(params.get('tab'), reportTabs.map((t) => t.value), 'overview')
-  const tab: ReportTab = 'overview'
-  const range = pick(params.get('range'), reportRanges.map((r) => r.value), '30')
-
-  const setParam = (key: string, value: string, fallback: string) => {
-    const next = new URLSearchParams(params)
-    if (value === fallback) next.delete(key)
-    else next.set(key, value)
-    setParams(next, { replace: true })
-  }
-
+function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRange }) {
+  const { kpis, trend, revenue, operational: mtd, workforce: staff, financial: fin, satisfaction: sat, activity } = view
   const rangeLabel = reportRanges.find((r) => r.value === range)!.label.toLowerCase()
-  const days = rangeDays(range)
-  const visits = visitFigures(days)
-  const util = utilisation(days)
-  const sat = satisfaction(range)
-  const trend = monthlyTrend(6)
-  const mtdDays = monthToDate()
-  const mtd = visitFigures(mtdDays)
-  const staff = workforce()
-  const fin = financialSummary()
-  const revenue = revenueOverview()
-  const currentMonth = revenue.months[revenue.months.length - 1].label
-  const maxMonth = Math.max(...revenue.months.map((m) => m.value))
-
-  if (asked !== 'overview') return <Navigate to={`/reports/${asked}`} replace />
-
-  const show = (...tabs: ReportTab[]) => tab === 'overview' || tabs.includes(tab)
-  const activity = reportActivity.filter((r) => tab === 'overview' || r.category === tab)
+  const currentMonth = revenue.months.length > 0 ? revenue.months[revenue.months.length - 1].label : '—'
+  const maxMonth = Math.max(1, ...revenue.months.map((m) => m.value))
 
   const range_ = (key: 'completion' | 'utilisation') => {
     const vals = trend.map((m) => m[key]).filter((v): v is number => v !== null)
@@ -177,68 +135,24 @@ export function ReportsPage() {
     return lo === hi ? `${lo}%` : `${lo}-${hi}%`
   }
 
-  const kpis: { label: string; value: string; note: string }[] = [
-    { label: 'Total Visits', value: visits.scheduled.toLocaleString('en-US'), note: reportRanges.find((r) => r.value === range)!.label },
-    { label: 'Caregiver Utilization', value: pctText(util), note: 'Rostered ÷ available hours' },
-    { label: 'Revenue', value: formatMoney(fin.monthlyRevenue), note: `Plan revenue · ${currentMonth}` },
+  const kpiCards: { label: string; value: string; note: string }[] = [
+    { label: 'Total Visits', value: kpis.totalVisits.toLocaleString('en-US'), note: reportRanges.find((r) => r.value === range)!.label },
+    { label: 'Caregiver Utilization', value: pctText(kpis.utilisation), note: 'Rostered ÷ available hours' },
+    { label: 'Revenue', value: formatMoney(kpis.revenueMajor), note: `Plan revenue · ${currentMonth}` },
     {
       label: 'Client Satisfaction',
-      value: sat.average === null ? '—' : `${sat.average}/5.0`,
-      note: `${sat.count} family ${sat.count === 1 ? 'review' : 'reviews'}`,
+      value: kpis.satisfactionAvg === null ? '—' : `${kpis.satisfactionAvg}/5.0`,
+      note: `${kpis.satisfactionCount} family ${kpis.satisfactionCount === 1 ? 'review' : 'reviews'}`,
     },
     {
       label: 'Visit Completion',
-      value: pctText(visits.completion),
-      note: `${visits.writtenUp} of ${visits.scheduled} written up`,
+      value: pctText(kpis.completion),
+      note: `As of today`,
     },
-    { label: 'Outstanding Invoices', value: formatMoney(fin.outstanding), note: 'As of today' },
+    { label: 'Outstanding Invoices', value: formatMoney(kpis.outstandingMajor), note: 'As of today' },
   ]
 
-  /** The figures on screen as a CSV — Excel opens it directly. */
-  const exportCsv = () => {
-    const rows: string[][] = [
-      ['Reports', `${days[0]} to ${days[days.length - 1]}`],
-      [],
-      ['Measure', 'Value', 'Basis'],
-      ...kpis.map((k) => [k.label, k.value, k.note]),
-      [],
-      ['Month', 'Scheduled visits', 'Completion (%)', 'Utilization (%)'],
-      ...trend.map((m) => [m.id, String(m.visits), String(m.completion ?? ''), String(m.utilisation ?? '')]),
-      [],
-      ['Month', 'Plan revenue (NGN)'],
-      ...revenue.months.map((m) => [m.label, String(m.value)]),
-      [],
-      ['Operational (month to date)', ''],
-      ['Visits this month', String(mtd.scheduled)],
-      ['Avg duration (hrs)', String(mtd.avgHours ?? '')],
-      ['On-time rate (%)', String(mtd.onTime ?? '')],
-      ['Cancellation rate (%)', String(mtd.cancellation ?? '')],
-      [],
-      ['Workforce', ''],
-      ['Active caregivers', String(staff.active)],
-      ['Avg rating', String(staff.avgRating ?? '')],
-      ['Training compliance (%)', String(staff.training ?? '')],
-      ['Attendance rate (%)', String(staff.attendance ?? '')],
-      [],
-      ['Financial', ''],
-      ['Monthly revenue (NGN)', String(fin.monthlyRevenue)],
-      ['Collection rate (%)', String(fin.collectionRate)],
-      ['Avg invoice (NGN)', String(fin.avgInvoice ?? '')],
-      ['Outstanding (NGN)', String(fin.outstanding)],
-      [],
-      ['Rating', 'Reviews', 'Share (%)'],
-      ...sat.breakdown.map((b) => [b.label, String(b.count), String(b.share)]),
-    ]
-    const csv = rows.map((r) => r.map(csvField).join(',')).join('\r\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `reports-${days[0]}-to-${days[days.length - 1]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const trendCard = show('operations', 'workforce') && (
+  const trendCard = (
     <Card
       title="Monthly Performance Trends"
       description="Aggregated metrics for service delivery over the last 6 months."
@@ -254,7 +168,7 @@ export function ReportsPage() {
           </li>
         </ul>
       }
-      className={show('financial') ? 'lg:col-span-3' : 'lg:col-span-5'}
+      className="lg:col-span-3"
     >
       <ul className="text-ink-muted mb-3 flex flex-wrap gap-x-5 gap-y-1 text-sm md:hidden" aria-hidden="true">
         <li className="flex items-center gap-2">
@@ -300,7 +214,7 @@ export function ReportsPage() {
         <tbody>
           {trend.map((m) => (
             <tr key={m.id}>
-              <th scope="row">{m.label}{m.partial ? ' (to date)' : ''}</th>
+              <th scope="row">{m.label}</th>
               <td>{pctText(m.completion)}</td>
               <td>{pctText(m.utilisation)}</td>
             </tr>
@@ -310,7 +224,7 @@ export function ReportsPage() {
     </Card>
   )
 
-  const revenueCard = show('financial') && (
+  const revenueCard = (
     <Card
       title="Revenue Overview"
       description={
@@ -319,7 +233,7 @@ export function ReportsPage() {
           <span className="font-semibold text-emerald-700 tabular-nums">{formatMoney(revenue.ytd)}</span>
         </>
       }
-      className={show('operations') ? 'lg:col-span-2' : 'lg:col-span-5'}
+      className="lg:col-span-2"
     >
       <div aria-hidden="true" className="bg-canvas flex h-48 items-end justify-between gap-3 rounded-xl px-4 pt-4 pb-2 sm:gap-4">
         {revenue.months.map((m) => (
@@ -347,57 +261,43 @@ export function ReportsPage() {
   )
 
   const summaries = [
-    show('operations') && (
-      <Card
-        key="ops"
-        title="Operational Performance"
-        aside={
-          <span className="text-brand-600">
-            <Sparkline series={dailyVisits(mtdDays)} unit="visits" label="Visits per day this month" className="h-8 w-24" />
-          </span>
-        }
-      >
-        <Readout
-          rows={[
-            { label: 'Visits This Month', value: String(mtd.scheduled) },
-            { label: 'Avg Duration', value: mtd.avgHours === null ? '—' : `${mtd.avgHours} hrs` },
-            { label: 'On-Time Rate', value: pctText(mtd.onTime), tone: 'text-emerald-700' },
-            { label: 'Cancellation Rate', value: pctText(mtd.cancellation), tone: 'text-red-600' },
-          ]}
-        />
-      </Card>
-    ),
-    show('workforce') && (
-      <Card
-        key="staff"
-        title="Workforce Summary"
-        aside={<Ring value={staff.total === 0 ? 0 : (staff.active / staff.total) * 100} />}
-      >
-        <Readout
-          rows={[
-            { label: 'Active Caregivers', value: String(staff.active) },
-            { label: 'Avg Rating', value: staff.avgRating === null ? '—' : `${staff.avgRating}/5.0`, tone: 'text-amber-700' },
-            { label: 'Training Compliance', value: pctText(staff.training), tone: 'text-emerald-700' },
-            { label: 'Attendance Rate', value: pctText(staff.attendance), tone: 'text-brand-600' },
-          ]}
-        />
-      </Card>
-    ),
-    show('financial') && (
-      <Card key="fin" title="Financial Summary" aside={<MiniBars values={revenue.months.slice(-5).map((m) => m.value)} />}>
-        <Readout
-          rows={[
-            { label: 'Monthly Revenue', value: formatMoney(fin.monthlyRevenue) },
-            { label: 'Collection Rate', value: `${fin.collectionRate}%`, tone: 'text-emerald-700' },
-            { label: 'Avg Invoice', value: fin.avgInvoice === null ? '—' : formatMoney(fin.avgInvoice) },
-            { label: 'Outstanding', value: formatMoney(fin.outstanding), tone: 'text-red-600' },
-          ]}
-        />
-      </Card>
-    ),
-  ].filter(Boolean)
+    <Card key="ops" title="Operational Performance">
+      <Readout
+        rows={[
+          { label: 'Visits This Month', value: String(mtd.visitsThisMonth) },
+          { label: 'Avg Duration', value: mtd.avgHours === null ? '—' : `${mtd.avgHours} hrs` },
+          { label: 'On-Time Rate', value: pctText(mtd.onTime), tone: 'text-emerald-700' },
+          { label: 'Cancellation Rate', value: pctText(mtd.cancellation), tone: 'text-red-600' },
+        ]}
+      />
+    </Card>,
+    <Card
+      key="staff"
+      title="Workforce Summary"
+      aside={<Ring value={staff.active === 0 ? 0 : 100} />}
+    >
+      <Readout
+        rows={[
+          { label: 'Active Caregivers', value: String(staff.active) },
+          { label: 'Avg Rating', value: staff.avgRating === null ? '—' : `${staff.avgRating}/5.0`, tone: 'text-amber-700' },
+          { label: 'Training Compliance', value: pctText(staff.training), tone: 'text-emerald-700' },
+          { label: 'Attendance Rate', value: pctText(staff.attendance), tone: 'text-brand-600' },
+        ]}
+      />
+    </Card>,
+    <Card key="fin" title="Financial Summary" aside={<MiniBars values={revenue.months.length > 0 ? revenue.months.slice(-5).map((m) => m.value) : [0]} />}>
+      <Readout
+        rows={[
+          { label: 'Monthly Revenue', value: formatMoney(fin.monthlyRevenue) },
+          { label: 'Collection Rate', value: pctText(fin.collectionRate), tone: 'text-emerald-700' },
+          { label: 'Avg Invoice', value: fin.avgInvoice === null ? '—' : formatMoney(fin.avgInvoice) },
+          { label: 'Outstanding', value: formatMoney(fin.outstanding), tone: 'text-red-600' },
+        ]}
+      />
+    </Card>,
+  ]
 
-  const satisfactionCard = show('operations') && (
+  const satisfactionCard = (
     <Card
       title="Client Satisfaction Breakdown"
       description={sat.count === 0 ? `No family reviews in the ${rangeLabel}.` : undefined}
@@ -429,7 +329,7 @@ export function ReportsPage() {
               <div className="min-w-0">
                 <p className="text-ink truncate text-sm font-semibold">{r.name}</p>
                 <p className="text-ink-subtle mt-0.5 text-xs">
-                  Generated {formatShortDate(r.generatedAt)} • By {r.by}
+                  Generated {formatShortDate(r.generatedAt.slice(0, 10))} • By {r.by}
                 </p>
               </div>
               {r.to ? (
@@ -441,7 +341,6 @@ export function ReportsPage() {
                   <ChartNoAxesColumn className="size-4.5" strokeWidth={2} aria-hidden="true" />
                 </Link>
               ) : (
-                // No file is stored in the prototype, so there is nothing to open.
                 <button
                   type="button"
                   aria-label={`Open ${r.name}`}
@@ -456,6 +355,89 @@ export function ReportsPage() {
       )}
     </Card>
   )
+
+  return (
+    <>
+      <section aria-labelledby="report-kpis">
+        <h2 id="report-kpis" className="sr-only">Key figures</h2>
+        <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+          {kpiCards.map((k) => (
+            <article key={k.label} className="card p-4">
+              <p className="text-ink text-[0.6875rem] font-semibold tracking-wide uppercase">{k.label}</p>
+              <p className="text-ink mt-2 text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums xl:text-xl 2xl:text-[1.75rem]">{k.value}</p>
+              <p className="text-ink-subtle mt-1 text-xs">{k.note}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+        <nav aria-label="Report views" className="flex flex-wrap gap-2">
+          {reportTabs.map((t) => {
+            const active = t.value === 'overview'
+            return (
+              <Link
+                key={t.value}
+                to={t.value === 'overview' ? '/reports' : `/reports/${t.value}`}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-brand-600 text-white'
+                    : 'border-control bg-surface text-ink hover:bg-sunken border',
+                )}
+              >
+                {t.label}
+              </Link>
+            )
+          })}
+        </nav>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        {trendCard}
+        {revenueCard}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">{summaries}</div>
+
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+        {satisfactionCard}
+        {activityCard}
+      </div>
+    </>
+  )
+}
+
+/* ---------------------------------- page ---------------------------------- */
+
+export function ReportsPage() {
+  const [params, setParams] = useSearchParams()
+  /* Operations, Workforce and Financial are pages of their own (/reports/…),
+     not filtered views of this one; an old ?tab= link is sent on to its page. */
+  const asked = pick(params.get('tab'), reportTabs.map((t) => t.value), 'overview')
+  const range = pick(params.get('range'), reportRanges.map((r) => r.value), '30')
+
+  const setParam = (key: string, value: string, fallback: string) => {
+    const next = new URLSearchParams(params)
+    if (value === fallback) next.delete(key)
+    else next.set(key, value)
+    setParams(next, { replace: true })
+  }
+
+  const { data, isPending, isError, error, refetch } = useReportsOverview(range)
+
+  if (asked !== 'overview') return <Navigate to={`/reports/${asked}`} replace />
+
+  const exportCsv = () => {
+    if (!data) return
+    const url = URL.createObjectURL(new Blob([buildOverviewCsv(data)], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `reports-${range}-days.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-6">
@@ -485,40 +467,7 @@ export function ReportsPage() {
         </div>
       </header>
 
-      <section aria-labelledby="report-kpis">
-        <h2 id="report-kpis" className="sr-only">Key figures</h2>
-        <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
-          {kpis.map((k) => (
-            <article key={k.label} className="card p-4">
-              <p className="text-ink text-[0.6875rem] font-semibold tracking-wide uppercase">{k.label}</p>
-              <p className="text-ink mt-2 text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums xl:text-xl 2xl:text-[1.75rem]">{k.value}</p>
-              <p className="text-ink-subtle mt-1 text-xs">{k.note}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <nav aria-label="Report views" className="flex flex-wrap gap-2">
-          {reportTabs.map((t) => {
-            const active = t.value === tab
-            return (
-              <Link
-                key={t.value}
-                to={t.value === 'overview' ? '/reports' : `/reports/${t.value}`}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-brand-600 text-white'
-                    : 'border-control bg-surface text-ink hover:bg-sunken border',
-                )}
-              >
-                {t.label}
-              </Link>
-            )
-          })}
-        </nav>
+      <div className="flex flex-wrap items-center justify-end gap-3 print:hidden">
         <SelectFilter
           label="Date range"
           valueOnly
@@ -529,27 +478,26 @@ export function ReportsPage() {
         />
       </div>
 
-      {(trendCard || revenueCard) && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-          {trendCard}
-          {revenueCard}
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading reports…
         </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load the reports.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Overview view={data} range={range} />
       )}
-
-      <div
-        className={cn(
-          'grid grid-cols-1 gap-6',
-          summaries.length === 3 && 'md:grid-cols-2 xl:grid-cols-3',
-          summaries.length === 2 && 'md:grid-cols-2',
-        )}
-      >
-        {summaries}
-      </div>
-
-      <div className={cn('grid grid-cols-1 items-start gap-6', satisfactionCard && 'lg:grid-cols-2')}>
-        {satisfactionCard}
-        {activityCard}
-      </div>
     </div>
   )
 }

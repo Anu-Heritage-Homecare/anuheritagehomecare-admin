@@ -1,29 +1,19 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowDown, ArrowRight, ArrowUp, Calendar, ChevronDown } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ArrowDown, ArrowRight, ArrowUp, Calendar, ChevronDown, Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import {
-  COMPLETION_TARGET,
-  SERVICE_BAR_SCALE,
-  cancellations,
-  completionByWeek,
-  dayTicks,
-  filterOptions,
-  locations,
-  reportingPeriod,
-  serviceTypes,
-  tiles,
-  visitsByDay,
-} from '@/features/reports/operations-report'
+import { filterOptions } from '@/features/reports/operations-report'
 import type { TileTone, Trend } from '@/features/reports/operations-report'
+import { periodOptions } from '@/features/reports/operations'
+import type { PeriodId } from '@/features/reports/operations'
+import { useOperationsReport } from '@/features/reports/useOperationsReport'
+import type { OperationsReportView } from '@/features/reports/useOperationsReport'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
 
-/*
- * Built to the Figma (operations-report), content included: the figures are the
- * design's own, held in features/reports/operations-report.ts. The filters are
- * real controls but do not recompute anything.
- */
+function pick<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback
+}
 
 const outlineButton =
   'border-line text-ink hover:bg-sunken bg-surface inline-flex h-9 items-center justify-center rounded-lg border px-3.5 text-sm font-medium shadow-xs transition-colors'
@@ -74,13 +64,14 @@ function Select({ label, options }: { label: string; options: readonly string[] 
 }
 
 /** Daily visits as a line over the design's blue wash; numbers are in the table. */
-function VisitsByDay() {
+function VisitsByDay({ visitsByDay, dayTicks }: { visitsByDay: number[]; dayTicks: OperationsReportView['dayTicks'] }) {
   const max = Math.max(...visitsByDay)
   const min = Math.min(...visitsByDay)
+  const span = max - min || 1
   const coords = visitsByDay.map((v, i) => ({
     v,
-    x: (i / (visitsByDay.length - 1)) * 100,
-    y: 8 + (1 - (v - min) / (max - min)) * 84,
+    x: visitsByDay.length === 1 ? 50 : (i / (visitsByDay.length - 1)) * 100,
+    y: 8 + (1 - (v - min) / span) * 84,
   }))
   return (
     <>
@@ -116,7 +107,7 @@ function VisitsByDay() {
                 'absolute whitespace-nowrap',
                 n === 0 ? '' : n === dayTicks.length - 1 ? '-translate-x-full' : '-translate-x-1/2',
               )}
-              style={{ left: `${coords[t.index].x}%` }}
+              style={{ left: `${coords[t.index]?.x ?? 0}%` }}
             >
               {t.label}
             </span>
@@ -124,11 +115,11 @@ function VisitsByDay() {
         </div>
       </div>
       <table className="sr-only">
-        <caption>Visits by day, October 2024</caption>
+        <caption>Visits by day</caption>
         <tbody>
           {visitsByDay.map((v, i) => (
             <tr key={i}>
-              <th scope="row">Oct {i + 1}</th>
+              <th scope="row">Day {i + 1}</th>
               <td>{v}</td>
             </tr>
           ))}
@@ -143,10 +134,10 @@ function VisitsByDay() {
 const SCALE_FLOOR = 60
 const onScale = (v: number) => ((v - SCALE_FLOOR) / (100 - SCALE_FLOOR)) * 100
 
-function CancellationDonut() {
+function CancellationDonut({ cancellations }: { cancellations: OperationsReportView['cancellations'] }) {
   const r = 38
   const c = 2 * Math.PI * r
-  const total = cancellations.reasons.reduce((s, x) => s + x.share, 0)
+  const total = cancellations.reasons.reduce((s, x) => s + x.share, 0) || 1
   const arcs = cancellations.reasons.reduce<{ label: string; colour: string; dash: number; offset: number }[]>((acc, x) => {
     const before = acc.reduce((s, a) => s + a.dash, 0)
     return [...acc, { label: x.label, colour: x.colour, dash: (x.share / total) * c, offset: -before }]
@@ -198,10 +189,11 @@ function csvField(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 
-/* ---------------------------------- page ---------------------------------- */
+/* ------------------------------- the report ------------------------------- */
 
-export function OperationsReportPage() {
-  /** The figures on screen as a CSV — Excel opens it directly. */
+function Report({ view, periodId, onPeriod }: { view: OperationsReportView; periodId: PeriodId; onPeriod: (id: PeriodId) => void }) {
+  const { reportingPeriod, tiles, visitsByDay, dayTicks, completionTarget, completionByWeek, cancellations, serviceTypes, serviceBarScale, locations } = view
+
   const exportExcel = () => {
     const rows: string[][] = [
       ['Operations Report', reportingPeriod],
@@ -209,7 +201,7 @@ export function OperationsReportPage() {
       ...tiles.map((t) => [t.label, t.value, t.badge]),
       [],
       ['Day', 'Visits'],
-      ...visitsByDay.map((v, i) => [`Oct ${i + 1}`, String(v)]),
+      ...visitsByDay.map((v, i) => [`Day ${i + 1}`, String(v)]),
       [],
       ['Week', 'Completion rate'],
       ...completionByWeek.map((w) => [w.label, `${w.value}%`]),
@@ -227,23 +219,13 @@ export function OperationsReportPage() {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = 'operations-report-oct-2024.csv'
+    a.download = 'operations-report.csv'
     a.click()
     URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="space-y-5">
-      <nav aria-label="Breadcrumb" className="text-ink-subtle mb-4 flex items-center gap-2 text-xs print:hidden">
-        <Link to="/reports" className="hover:text-ink">
-          Reports
-        </Link>
-        <span aria-hidden="true">&gt;</span>
-        <span aria-current="page" className="text-brand-600 font-medium">
-          Operations Report
-        </span>
-      </nav>
-
+    <>
       <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-ink text-[1.625rem] leading-tight font-bold tracking-tight">Operations Report</h1>
@@ -275,10 +257,15 @@ export function OperationsReportPage() {
         <label className="relative">
           <span className="sr-only">Reporting period</span>
           <SelectBox
-            defaultValue={reportingPeriod}
+            value={periodId}
+            onChange={(e) => onPeriod(e.target.value as PeriodId)}
             className="text-ink-muted focus-visible:outline-brand-600 h-8 appearance-none rounded-md bg-transparent pr-6 pl-1 text-right text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
           >
-            <option>{reportingPeriod}</option>
+            {periodOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </SelectBox>
           <ChevronDown
             className="text-ink-muted pointer-events-none absolute top-1/2 right-1 size-3.5 -translate-y-1/2"
@@ -311,7 +298,7 @@ export function OperationsReportPage() {
         </div>
 
         <h3 className="text-ink mt-6 mb-3 text-sm font-medium">Visits by Day (Daily trends)</h3>
-        <VisitsByDay />
+        <VisitsByDay visitsByDay={visitsByDay} dayTicks={dayTicks} />
       </Card>
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
@@ -320,10 +307,10 @@ export function OperationsReportPage() {
             <div className="relative h-44">
               <div
                 className="absolute inset-x-0 border-t-2 border-dashed border-emerald-500"
-                style={{ bottom: `${onScale(COMPLETION_TARGET)}%` }}
+                style={{ bottom: `${onScale(completionTarget)}%` }}
               >
                 <span className="absolute bottom-1 left-4 text-[0.625rem] font-semibold text-emerald-700">
-                  Target: {COMPLETION_TARGET}%
+                  Target: {completionTarget}%
                 </span>
               </div>
               <div className="absolute inset-0 flex items-end justify-around px-4">
@@ -343,7 +330,7 @@ export function OperationsReportPage() {
             </div>
           </div>
           <table className="sr-only">
-            <caption>Visit completion rate by week; target {COMPLETION_TARGET}%</caption>
+            <caption>Visit completion rate by week; target {completionTarget}%</caption>
             <tbody>
               {completionByWeek.map((w) => (
                 <tr key={w.label}>
@@ -356,7 +343,7 @@ export function OperationsReportPage() {
         </Card>
 
         <Card title="Cancellation Reasons">
-          <CancellationDonut />
+          <CancellationDonut cancellations={cancellations} />
         </Card>
       </div>
 
@@ -369,7 +356,7 @@ export function OperationsReportPage() {
                 <span className="text-brand-600 font-semibold tabular-nums">{s.visits} visits</span>
               </div>
               <div className="bg-sunken mt-2 h-2 overflow-hidden rounded-full" aria-hidden="true">
-                <div className="bg-brand-600 h-full rounded-full" style={{ width: `${(s.visits / SERVICE_BAR_SCALE) * 100}%` }} />
+                <div className="bg-brand-600 h-full rounded-full" style={{ width: `${(s.visits / serviceBarScale) * 100}%` }} />
               </div>
             </li>
           ))}
@@ -409,6 +396,56 @@ export function OperationsReportPage() {
           </table>
         </div>
       </Card>
+    </>
+  )
+}
+
+/* ---------------------------------- page ---------------------------------- */
+
+export function OperationsReportPage() {
+  const [params, setParams] = useSearchParams()
+  const periodId = pick(params.get('period'), periodOptions.map((o) => o.value), '30') as PeriodId
+  const { data, isPending, isError, error, refetch } = useOperationsReport(periodId)
+
+  const onPeriod = (id: PeriodId) => {
+    const next = new URLSearchParams(params)
+    if (id === '30') next.delete('period')
+    else next.set('period', id)
+    setParams(next, { replace: true })
+  }
+
+  return (
+    <div className="space-y-5">
+      <nav aria-label="Breadcrumb" className="text-ink-subtle mb-4 flex items-center gap-2 text-xs print:hidden">
+        <Link to="/reports" className="hover:text-ink">
+          Reports
+        </Link>
+        <span aria-hidden="true">&gt;</span>
+        <span aria-current="page" className="text-brand-600 font-medium">
+          Operations Report
+        </span>
+      </nav>
+
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading operations report…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load the operations report.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Report view={data} periodId={periodId} onPeriod={onPeriod} />
+      )}
     </div>
   )
 }
