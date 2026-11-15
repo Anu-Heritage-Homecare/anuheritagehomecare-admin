@@ -1,13 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight } from 'lucide-react'
-import { getRecipientProfile } from '@/features/care-recipients/profile-data'
-import { addHealthEvent, eventKinds } from '@/features/care-recipients/health-data'
+import { eventKinds } from '@/features/care-recipients/health-data'
+import { api, ApiError } from '@/lib/api'
 import { Field } from '@/components/ui/Field'
 import { fieldControl } from '@/lib/field-classes'
 import { SIGNED_IN, SIGNED_IN_ROLE } from '@/lib/session'
 import { TODAY } from '@/lib/today'
 import { SelectBox } from '@/components/ui/SelectBox'
+
+/** The Add Health Event kind to the backend health event category. */
+const BACKEND_CATEGORY: Record<string, string> = {
+  vitals: 'VITALS',
+  'vitals-alert': 'VITALS',
+  incident: 'INCIDENT',
+  medication: 'MEDICATION',
+  assessment: 'ASSESSMENT',
+  appointment: 'APPOINTMENT',
+}
 
 /*
  * Add Health Event. There is no Figma for it; it records one entry on the
@@ -16,10 +27,19 @@ import { SelectBox } from '@/components/ui/SelectBox'
  * exactly like the existing ones. Vitals trends are not changed by it.
  */
 
+interface CreateHealthEventBody {
+  category: string
+  title: string
+  description: string
+  recordedByName?: string
+  recordedByRole?: string
+  occurredAt: string
+}
+
 export function AddHealthEventPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const profile = useMemo(() => getRecipientProfile(id), [id])
+  const queryClient = useQueryClient()
 
   const [kind, setKind] = useState('')
   const [title, setTitle] = useState('')
@@ -29,18 +49,20 @@ export function AddHealthEventPage() {
   const [role, setRole] = useState(SIGNED_IN_ROLE)
   const [submitted, setSubmitted] = useState(false)
 
-  if (!profile) {
-    return (
-      <div className="card grid place-items-center px-6 py-20 text-center">
-        <p className="text-ink text-sm font-semibold">Care recipient not found</p>
-        <Link to="/care-recipients" className="text-brand-700 mt-2 text-sm font-medium hover:underline">
-          Back to Care Recipients
-        </Link>
-      </div>
-    )
-  }
+  const back = `/care-recipients/${id}/health`
 
-  const back = `/care-recipients/${profile.id}/health`
+  const mutation = useMutation({
+    mutationFn: (body: CreateHealthEventBody) =>
+      api.post<unknown>(`/admin/care-recipients/${id}/health/events`, body),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin', 'care-recipients', id, 'health'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin', 'care-recipients', id, 'profile'] }),
+      ])
+      navigate(back)
+    },
+  })
+
   const chosen = eventKinds.find((k) => k.id === kind)
   const errors = {
     kind: chosen ? undefined : 'Choose the type of event.',
@@ -59,25 +81,22 @@ export function AddHealthEventPage() {
       onSubmit={(e) => {
         e.preventDefault()
         setSubmitted(true)
-        if (invalid || !chosen) return
-        addHealthEvent(profile.id, {
-          date,
+        if (invalid || !chosen || mutation.isPending) return
+        mutation.mutate({
+          category: BACKEND_CATEGORY[chosen.id] ?? 'ASSESSMENT',
           title: title.trim(),
-          detail: detail.trim(),
-          recordedBy: recordedBy.trim(),
-          recordedByRole: role.trim(),
-          category: chosen.category,
-          badge: chosen.badge,
-          tone: chosen.tone,
+          description: detail.trim(),
+          recordedByName: recordedBy.trim() || undefined,
+          recordedByRole: role.trim() || undefined,
+          occurredAt: new Date(`${date}T00:00:00`).toISOString(),
         })
-        navigate(back)
       }}
     >
       <nav aria-label="Breadcrumb">
         <ol className="text-ink-muted flex flex-wrap items-center gap-1.5 text-sm">
           <li><Link to="/care-recipients" className="hover:text-ink">Care Recipients</Link></li>
           <li aria-hidden="true"><ChevronRight className="size-3.5" strokeWidth={2.4} /></li>
-          <li><Link to={back} className="hover:text-ink">{profile.name}</Link></li>
+          <li><Link to={back} className="hover:text-ink">Care Recipient</Link></li>
           <li aria-hidden="true"><ChevronRight className="size-3.5" strokeWidth={2.4} /></li>
           <li className="text-ink" aria-current="page">Add Health Event</li>
         </ol>
@@ -85,12 +104,18 @@ export function AddHealthEventPage() {
 
       <header className="-mt-4">
         <h1 className="text-ink text-2xl font-bold tracking-tight">Add Health Event</h1>
-        <p className="text-ink-muted mt-1 text-sm">Record a reading, incident, assessment or appointment for {profile.name}.</p>
+        <p className="text-ink-muted mt-1 text-sm">Record a reading, incident, assessment or appointment for this care recipient.</p>
       </header>
 
       {submitted && invalid && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
           Some details are missing before this event can be added.
+        </div>
+      )}
+
+      {mutation.isError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+          {mutation.error instanceof ApiError ? mutation.error.message : 'Could not add this health event. Please try again.'}
         </div>
       )}
 
@@ -137,8 +162,12 @@ export function AddHealthEventPage() {
         <Link to={back} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
           Cancel
         </Link>
-        <button type="submit" className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
-          Add Health Event
+        <button
+          type="submit"
+          disabled={mutation.isPending}
+          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white disabled:cursor-default disabled:opacity-60"
+        >
+          {mutation.isPending ? 'Adding…' : 'Add Health Event'}
         </button>
       </div>
     </form>

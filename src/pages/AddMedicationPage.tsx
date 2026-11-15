@@ -1,22 +1,25 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { getRecipientProfile } from '@/features/care-recipients/profile-data'
-import { addPrescription } from '@/features/care-recipients/medications-data'
+import { api, ApiError } from '@/lib/api'
 import { Field } from '@/components/ui/Field'
 import { fieldControl } from '@/lib/field-classes'
 import { TODAY } from '@/lib/today'
 
 /*
  * Add Medication. There is no Figma for it; the fields are the ones each
- * prescription card on the Medications tab shows. A new prescription starts
- * active with no adherence and no doses given — those come from records, not
- * from this form — and is entered in the prescription history.
+ * prescription card on the Medications tab shows. The schedule stays free text,
+ * so it is sent as `instructions` and no structured dose times are derived (the
+ * backend accepts `doseTimes` only when a schedule can be parsed into minutes,
+ * which free text cannot). Brand has no backend field and is not sent.
  */
 
 export function AddMedicationPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const profile = useMemo(() => getRecipientProfile(id), [id])
 
   const [name, setName] = useState('')
@@ -29,6 +32,32 @@ export function AddMedicationPage() {
   const [flag, setFlag] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
+  const back = `/care-recipients/${id}/medications`
+
+  const addMedication = useMutation({
+    mutationFn: () =>
+      api.post(`/admin/care-recipients/${id}/medications`, {
+        name: name.trim(),
+        dose: strength.trim() || undefined,
+        purpose: purpose.trim() || undefined,
+        prescribedBy: prescribedBy.trim() || undefined,
+        startDate: startDate || undefined,
+        instructions: schedule.trim() || undefined,
+        note: flag.trim() || undefined,
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['admin', 'care-recipients', id, 'medications'],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['admin', 'care-recipients', id, 'profile'],
+        }),
+      ])
+      navigate(back)
+    },
+  })
+
   if (!profile) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
@@ -40,7 +69,6 @@ export function AddMedicationPage() {
     )
   }
 
-  const back = `/care-recipients/${profile.id}/medications`
   const errors = {
     name: name.trim() ? undefined : 'Enter the medication name.',
     strength: strength.trim() ? undefined : 'Enter the strength, e.g. 10mg.',
@@ -51,6 +79,7 @@ export function AddMedicationPage() {
   }
   const invalid = Object.values(errors).some(Boolean)
   const show = (k: keyof typeof errors) => (submitted ? errors[k] : undefined)
+  const submitError = addMedication.error instanceof ApiError ? addMedication.error.message : null
 
   return (
     <form
@@ -60,17 +89,7 @@ export function AddMedicationPage() {
         e.preventDefault()
         setSubmitted(true)
         if (invalid) return
-        addPrescription(profile.id, {
-          name: name.trim(),
-          brand: brand.trim() || undefined,
-          strength: strength.trim(),
-          purpose: purpose.trim(),
-          schedule: schedule.trim(),
-          prescribedBy: prescribedBy.trim(),
-          startDate,
-          flag: flag.trim() || undefined,
-        })
-        navigate(back)
+        addMedication.mutate()
       }}
     >
       <nav aria-label="Breadcrumb">
@@ -91,6 +110,12 @@ export function AddMedicationPage() {
       {submitted && invalid && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
           Some details are missing before this medication can be added.
+        </div>
+      )}
+
+      {submitError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+          {submitError}
         </div>
       )}
 
@@ -128,8 +153,8 @@ export function AddMedicationPage() {
         <Link to={back} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
           Cancel
         </Link>
-        <button type="submit" className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
-          Add Medication
+        <button type="submit" disabled={addMedication.isPending} className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white disabled:opacity-60">
+          {addMedication.isPending ? 'Adding…' : 'Add Medication'}
         </button>
       </div>
     </form>

@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Loader2 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { coordinators } from '@/features/care-recipients/data'
-import { getRecipientProfile, saveRecipientProfile } from '@/features/care-recipients/profile-data'
+import { useRecipientProfile } from '@/features/care-recipients/useRecipientProfile'
 import type { RecipientProfile } from '@/features/care-recipients/profile-data'
+import { api, ApiError } from '@/lib/api'
 import { Field } from '@/components/ui/Field'
 import { fieldControl } from '@/lib/field-classes'
 import { TODAY } from '@/lib/today'
@@ -13,8 +15,12 @@ import { SelectBox } from '@/components/ui/SelectBox'
 /*
  * Edit Profile for a care recipient. There is no Figma for it; it edits what
  * the profile header, Overview tab and directory already show, laid out like
- * the caregiver edit page. Caregiver assignment, status and family stay with
- * their own flows (Caregivers tab, Discharge, Family tab).
+ * the caregiver edit page.
+ *
+ * The backend exposes no general profile-update endpoint for this module, so of
+ * the fields below only Priority has a live write (POST /:id/priority). The rest
+ * stay editable for review but cannot be persisted yet; the page says so plainly
+ * rather than pretending the save stuck.
  */
 
 const careLevels: CareLevel[] = ['Full-Time', 'Part-Time', 'Hourly', '24-Hour']
@@ -27,16 +33,22 @@ const priorities: { value: Priority; label: string }[] = [
   { value: 'critical', label: 'Critical' },
 ]
 
+/** Frontend lowercase priority to the backend enum token. */
+const PRIORITY_TOKEN: Record<Priority, string> = {
+  critical: 'CRITICAL',
+  urgent: 'URGENT',
+  high: 'HIGH',
+  medium: 'MEDIUM',
+  normal: 'NORMAL',
+  low: 'LOW',
+}
+
 /** "June 15, 1948" → "1948-06-15"; '' when it does not read as a date. */
 function toIso(display: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(display)) return display
   const d = new Date(display)
   if (Number.isNaN(d.getTime())) return ''
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function toLong(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 function ageOn(dob: string, today = TODAY): number | null {
@@ -90,23 +102,43 @@ function validate(v: Values): Partial<Record<keyof Values, string>> {
 
 export function RecipientEditPage() {
   const { id = '' } = useParams()
-  const profile = useMemo(() => getRecipientProfile(id), [id])
+  const profileQuery = useRecipientProfile(id)
 
-  if (!profile) {
+  if (profileQuery.isPending) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
-        <p className="text-ink text-sm font-semibold">Care recipient not found</p>
-        <Link to="/care-recipients" className="text-brand-700 mt-2 text-sm font-medium hover:underline">
-          Back to Care Recipients
-        </Link>
+        <Loader2 className="text-brand-600 size-6 animate-spin" aria-hidden="true" />
+        <p className="text-ink-muted mt-3 text-sm">Loading profile…</p>
       </div>
     )
   }
-  return <EditForm key={profile.id} profile={profile} />
+
+  if (profileQuery.isError || !profileQuery.data) {
+    const message =
+      profileQuery.error instanceof ApiError
+        ? profileQuery.error.message
+        : 'This care recipient could not be loaded.'
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <p className="text-ink text-sm font-semibold">Could not load profile</p>
+        <p className="text-ink-muted mt-2 text-sm">{message}</p>
+        <button
+          type="button"
+          onClick={() => void profileQuery.refetch()}
+          className="text-brand-700 mt-2 text-sm font-medium hover:underline"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  return <EditForm key={profileQuery.data.id} profile={profileQuery.data} />
 }
 
 function EditForm({ profile }: { profile: RecipientProfile }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const back = `/care-recipients/${profile.id}/overview`
   const [values, setValues] = useState(() => initialValues(profile))
   const [submitted, setSubmitted] = useState(false)
@@ -115,6 +147,17 @@ function EditForm({ profile }: { profile: RecipientProfile }) {
   const show = (k: keyof Values) => (submitted ? errors[k] : undefined)
   const set = <K extends keyof Values>(k: K, v: Values[K]) => setValues((s) => ({ ...s, [k]: v }))
   const sexes = ['Female', 'Male'].includes(profile.sex) ? ['Female', 'Male'] : ['Female', 'Male', profile.sex]
+
+  const setPriority = useMutation({
+    mutationFn: (priority: Priority) =>
+      api.post<void>(`/admin/care-recipients/${profile.id}/priority`, {
+        priority: PRIORITY_TOKEN[priority],
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ['admin', 'care-recipients', profile.id] }),
+  })
+
+  const saveError = setPriority.error instanceof ApiError ? setPriority.error.message : null
 
   const actions = (
     <div className="flex gap-2">
@@ -126,8 +169,10 @@ function EditForm({ profile }: { profile: RecipientProfile }) {
       </Link>
       <button
         type="submit"
-        className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+        disabled={setPriority.isPending}
+        className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white disabled:cursor-default disabled:opacity-50"
       >
+        {setPriority.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
         Save Changes
       </button>
     </div>
@@ -142,39 +187,12 @@ function EditForm({ profile }: { profile: RecipientProfile }) {
         setSubmitted(true)
         const age = ageOn(values.dob)
         if (invalid || age === null) return
-        saveRecipientProfile(
-          profile.id,
-          {
-            name: values.name.trim(),
-            age,
-            condition: values.condition.trim(),
-            careLevel: values.careLevel,
-            priority: values.priority,
-          },
-          {
-            sex: values.sex,
-            personal: {
-              phone: values.phone.trim(),
-              email: values.email.trim(),
-              address: values.address.trim(),
-              dateOfBirth: toLong(values.dob),
-              languages: values.languages.trim(),
-            },
-            summary: {
-              startDateIso: values.startDate,
-              startDate: toLong(values.startDate),
-              primaryDiagnosis: values.primaryDiagnosis.trim(),
-              secondaryDiagnosis: values.secondaryDiagnosis.trim(),
-              coordinator: values.coordinator,
-              emergencyContact: {
-                name: values.contactName.trim(),
-                relationship: values.contactRelationship.trim(),
-                phone: values.contactPhone.trim(),
-              },
-            },
-          },
-        )
-        navigate(back)
+        // Only Priority has a backend write today. The other fields are
+        // validated and editable but not persisted (see the notice below).
+        setPriority.reset()
+        setPriority.mutate(values.priority, {
+          onSuccess: () => navigate(back),
+        })
       }}
     >
       <nav aria-label="Breadcrumb">
@@ -200,6 +218,20 @@ function EditForm({ profile }: { profile: RecipientProfile }) {
         </div>
         {actions}
       </header>
+
+      <div role="note" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        <p className="font-semibold">Only Priority is saved for now.</p>
+        <p className="mt-0.5 text-amber-700">
+          The other fields on this page are read only until a profile update service is available;
+          editing them here will not change the record.
+        </p>
+      </div>
+
+      {saveError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-semibold">{saveError}</p>
+        </div>
+      )}
 
       {submitted && invalid && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -262,7 +294,7 @@ function EditForm({ profile }: { profile: RecipientProfile }) {
               </SelectBox>
             )}
           </Field>
-          <Field label="Priority">
+          <Field label="Priority" hint="Saved live.">
             {(p) => (
               <SelectBox {...p} className={fieldControl} value={values.priority} onChange={(e) => set('priority', e.target.value as Priority)}>
                 {priorities.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

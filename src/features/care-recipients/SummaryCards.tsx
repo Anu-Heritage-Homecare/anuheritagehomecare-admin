@@ -1,8 +1,8 @@
-import { summaries } from './data'
+import type { Summary } from './data'
 import { toneText } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
-export function SummaryCards() {
+export function SummaryCards({ summaries }: { summaries: Summary[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 xl:grid-cols-4">
       {summaries.map(({ id, label, value, meta, metaTone, hint }) => (

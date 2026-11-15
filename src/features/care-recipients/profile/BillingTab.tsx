@@ -1,18 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { Receipt } from 'lucide-react'
+import { Loader2, Receipt } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
+import { useRecipientBilling } from '../useRecipientBilling'
 import {
   INVOICES_PAGE_SIZE,
   billedDelta,
   billedThisMonth,
   formatLongDate,
   formatMoney,
-  getBillingRecord,
   invoiceStatus,
   nextDueDate,
   outstandingBalance,
-  payments,
   sortInvoices,
 } from '../billing-data'
 import { BillingInfo } from './BillingInfo'
@@ -25,17 +24,44 @@ import type { Tone } from '@/types'
 
 export function BillingTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const record = getBillingRecord(profile.id)
+  const { data, isPending, isError, error, refetch } = useRecipientBilling(profile.id)
   const [page, setPage] = useState(1)
 
+  const record = data?.record
   const rate = record?.insurance.coverageRate ?? 0
   const invoices = useMemo(
     () => sortInvoices(record?.invoices ?? []),
     [record],
   )
-  const history = useMemo(() => payments(invoices, rate), [invoices, rate])
+  // Exact payment amounts and labels from the DTO, not recomputed from the rate.
+  const history = data?.payments ?? []
 
-  if (!record) {
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading billing record…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load billing record</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (!record || record.invoices.length === 0) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
         <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">

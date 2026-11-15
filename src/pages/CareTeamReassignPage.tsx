@@ -1,24 +1,21 @@
 import { useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BadgeCheck,
   CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
+  Loader2,
   MapPin,
   Search,
   Star,
   TriangleAlert,
 } from 'lucide-react'
-import {
-  addTeamMember,
-  getCaregiverRecord,
-  openRoles,
-  reassignTeamMember,
-  replacementsFor,
-} from '@/features/care-recipients/caregivers-data'
+import { openRoles, replacementsFor } from '@/features/care-recipients/caregivers-data'
 import type { CaregiverRole, TeamMember } from '@/features/care-recipients/caregivers-data'
+import { useRecipientCaregivers } from '@/features/care-recipients/useRecipientCaregivers'
 import { getRecipientProfile } from '@/features/care-recipients/profile-data'
 import type { RecipientProfile } from '@/features/care-recipients/profile-data'
 import { credentialStates, performanceFor } from '@/features/caregivers/roster-data'
@@ -129,25 +126,60 @@ export function CareTeamReassignPage() {
   const [params] = useSearchParams()
   const profile = useMemo(() => getRecipientProfile(id), [id])
   const back = id ? `/care-recipients/${id}/caregivers` : '/care-recipients'
+  // The seat being reassigned is read live, so the outgoing member carries the
+  // backend assignmentId the remove action needs.
+  const { data: record, isPending, isError, error, refetch } = useRecipientCaregivers(id)
+
   if (!profile) return <Navigate to={back} replace />
 
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading care team…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load care team</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  const team = record.team
+
   if (memberId) {
-    const member = getCaregiverRecord(id)?.team.find((m) => m.id === memberId)
+    const member = team.find((m) => m.id === memberId)
     if (!member) return <Navigate to={back} replace />
-    return <ReassignView key={member.id} profile={profile} seat={{ role: member.role, outgoing: member }} />
+    return (
+      <ReassignView key={member.id} profile={profile} team={team} seat={{ role: member.role, outgoing: member }} />
+    )
   }
 
   const roles = openRoles(id)
   const role = roles.find((r) => r === params.get('role')) ?? roles[0]
-  return <ReassignView key={`assign-${role}`} profile={profile} seat={{ role }} roles={roles} />
+  return <ReassignView key={`assign-${role}`} profile={profile} team={team} seat={{ role }} roles={roles} />
 }
 
 function ReassignView({
   profile,
+  team,
   seat,
   roles = [],
 }: {
   profile: RecipientProfile
+  team: TeamMember[]
   seat: Seat
   /** Assign mode only: the seats that can be filled. */
   roles?: CaregiverRole[]
@@ -156,8 +188,30 @@ function ReassignView({
   const assigning = !member
   const heading = assigning ? 'Assign Caregiver' : 'Reassign Caregiver'
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const back = `/care-recipients/${profile.id}/caregivers`
+
+  /*
+   * Live action gap. Assigning or replacing a seat needs the backend caregiver
+   * UUID of the chosen person, and there is no caregiver directory endpoint to
+   * obtain one; the candidates here are the local roster, whose ids are not
+   * backend ids. The only backend mutation whose ids are already in hand would
+   * be removing the outgoing assignment, but that DELETE requires a reason body
+   * and the shared api.delete client cannot send one. So no confirm action can
+   * persist today; the one safe write (revise, via api.put) does not match this
+   * picker's intent. The confirm therefore refetches the live team and returns,
+   * and tells the user the change is not yet persisted. Wire the real assign and
+   * reassign once a caregiver directory endpoint and a DELETE body are available.
+   */
+  const confirmSeat = useMutation({
+    mutationFn: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['admin', 'care-recipients', profile.id, 'caregivers'],
+      })
+    },
+    onSuccess: () => navigate(back),
+  })
 
   const search = params.get('q') ?? ''
   const sort = params.get('sort') ?? 'match'
@@ -214,7 +268,7 @@ function ReassignView({
           { label: 'Currently', value: member.name },
           { label: 'Schedule', value: member.schedule },
         ]
-      : [{ label: 'Team size', value: `${getCaregiverRecord(profile.id)?.team.length ?? 0} people` }]),
+      : [{ label: 'Team size', value: `${team.length} people` }]),
     { label: 'Care level', value: profile.careLevel },
     { label: 'Location', value: profile.personal.address },
   ]
@@ -349,12 +403,9 @@ function ReassignView({
           candidate={selected}
           seat={seat}
           profile={profile}
+          pending={confirmSeat.isPending}
           onClear={() => set('selected', '')}
-          onConfirm={(reason) => {
-            if (member) reassignTeamMember(profile.id, member.id, selected.member.name, reason)
-            else addTeamMember(profile.id, selected.member.name, seat.role, reason)
-            navigate(back)
-          }}
+          onConfirm={() => confirmSeat.mutate()}
         />
       )}
     </div>
@@ -530,14 +581,16 @@ function ConfirmBar({
   candidate,
   seat,
   profile,
+  pending,
   onClear,
   onConfirm,
 }: {
   candidate: Candidate
   seat: Seat
   profile: RecipientProfile
+  pending: boolean
   onClear: () => void
-  onConfirm: (reason: string) => void
+  onConfirm: () => void
 }) {
   const [reason, setReason] = useState('')
   const member = seat.outgoing
@@ -551,16 +604,18 @@ function ConfirmBar({
               ? `${candidate.member.name} replaces ${member.name} as ${seat.role} for ${profile.name}`
               : `${candidate.member.name} joins ${profile.name}’s care team as ${seat.role}`}
           </p>
-          {!member ? (
-            <p className="text-ink-subtle mt-0.5 text-xs">Added to the team and recorded in the Assignment History.</p>
-          ) : candidate.gaps.length > 0 ? (
+          {member && candidate.gaps.length > 0 && (
             <p className="mt-0.5 flex items-start gap-1.5 text-xs text-amber-900">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" strokeWidth={2.4} aria-hidden="true" />
               <span className="break-words">Check before confirming: {candidate.gaps.join(', ').toLowerCase()} not on their record.</span>
             </p>
-          ) : (
-            <p className="text-ink-subtle mt-0.5 text-xs">Covers every skill {member.name.split(' ')[0]} brought to the seat.</p>
           )}
+          {/* Honest gap: without a caregiver directory endpoint there is no
+              backend id to assign, so this is not yet saved. */}
+          <p className="text-ink-subtle mt-0.5 flex items-start gap-1.5 text-xs">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" strokeWidth={2.4} aria-hidden="true" />
+            <span className="break-words">Not yet saved: assigning a caregiver needs a directory that is not available yet.</span>
+          </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="reassign-reason">Reason</label>
@@ -578,12 +633,16 @@ function ConfirmBar({
           </button>
           <button
             type="button"
-            disabled={!reason}
-            onClick={() => onConfirm(reason)}
+            disabled={!reason || pending}
+            onClick={() => onConfirm()}
             className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-11 items-center gap-2 rounded-lg px-5 text-sm font-semibold text-white"
           >
             <BadgeCheck className="size-4" strokeWidth={2.2} aria-hidden="true" />
-            {member ? 'Confirm reassignment' : 'Confirm assignment'}
+            {pending
+              ? 'Working…'
+              : member
+                ? 'Confirm reassignment'
+                : 'Confirm assignment'}
           </button>
         </div>
       </div>
