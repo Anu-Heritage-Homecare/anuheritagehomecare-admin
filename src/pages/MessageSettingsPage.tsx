@@ -36,6 +36,9 @@ import { SelectBox } from '@/components/ui/SelectBox'
  * The lists here are the ones the composer offers, and the auto-archive rules
  * are the ones the folders read — changing either moves the inbox straight
  * away. The notification switches record how this account wants to be reached.
+ *
+ * Left on the in-memory messages store on purpose: there is no messages or chat
+ * backend module to read from, so this screen stays static until one exists.
  */
 export function MessageSettingsPage() {
   useMessageSettings()

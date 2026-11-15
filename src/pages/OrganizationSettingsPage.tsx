@@ -1,24 +1,25 @@
 import { useState } from 'react'
-import { Building2, CalendarDays, Download, Pencil, PhoneCall, Plus, ShieldAlert } from 'lucide-react'
+import { Building2, CalendarDays, Download, Loader2, Pencil, PhoneCall, Plus, ShieldAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  addBranch,
-  addContact,
   currencyOptions,
   dateFormatOptions,
   defaultBranchHours,
   formatHour,
   languageOptions,
   nigerianStates,
-  setDayOpen,
-  setHours,
   timezoneOptions,
-  updateProfile,
   useOrganization,
+  useOrganizationMutations,
   validHours,
   validPhone,
 } from '@/features/settings/organization'
-import type { ContactKind, OrgDayHours, OrgProfile } from '@/features/settings/organization'
+import type {
+  ContactKind,
+  OrganizationSettings,
+  OrgDayHours,
+  OrgProfile,
+} from '@/features/settings/organization'
 import { useUsers } from '@/features/settings/users'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
@@ -26,7 +27,7 @@ import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
 
 const outlineButton =
-  'border-control text-ink hover:bg-sunken inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors print:hidden'
+  'border-control text-ink hover:bg-sunken inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors print:hidden disabled:opacity-50'
 const fieldClass =
   'border-control focus:border-brand-500 bg-surface mt-1.5 h-10 w-full rounded-lg border px-3 text-sm'
 
@@ -36,6 +37,8 @@ const contactIcon: Record<ContactKind, LucideIcon> = {
 }
 
 type Dialog = 'profile' | 'schedule' | 'branch' | 'contact' | null
+
+type Mutations = ReturnType<typeof useOrganizationMutations>
 
 function Card({
   title,
@@ -69,16 +72,16 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   return (
     <div className="min-w-0">
       <dt className="text-ink-subtle text-[0.6875rem] font-medium tracking-wide uppercase">{label}</dt>
-      <dd className="text-ink mt-1 text-sm whitespace-pre-line">{children}</dd>
+      <dd className="text-ink mt-1 text-sm whitespace-pre-line">{children || '—'}</dd>
     </div>
   )
 }
 
 export function OrganizationSettingsPage() {
-  const org = useOrganization()
+  const { data: org, isPending, isError, error, refetch } = useOrganization()
+  const mutations = useOrganizationMutations()
   const [dialog, setDialog] = useState<Dialog>(null)
   const close = () => setDialog(null)
-  const activeBranches = org.branches.filter((b) => b.active).length
 
   return (
     <div className="space-y-5">
@@ -100,6 +103,47 @@ export function OrganizationSettingsPage() {
         </button>
       </header>
 
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading organization…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load the organization settings.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Content org={org} mutations={mutations} dialog={dialog} setDialog={setDialog} close={close} />
+      )}
+    </div>
+  )
+}
+
+function Content({
+  org,
+  mutations,
+  dialog,
+  setDialog,
+  close,
+}: {
+  org: OrganizationSettings
+  mutations: Mutations
+  dialog: Dialog
+  setDialog: (d: Dialog) => void
+  close: () => void
+}) {
+  const activeBranches = org.branches.filter((b) => b.active).length
+
+  return (
+    <>
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(0,1fr)]">
         <div className="space-y-5">
           <Card
@@ -116,8 +160,8 @@ export function OrganizationSettingsPage() {
                 <Building2 className="size-7" strokeWidth={1.8} aria-hidden="true" />
               </span>
               <div className="min-w-0">
-                <p className="text-ink text-base font-semibold break-words">{org.profile.name}</p>
-                <p className="text-ink-muted mt-0.5 text-sm">Business Reg: {org.profile.registration}</p>
+                <p className="text-ink text-base font-semibold break-words">{org.profile.name || '—'}</p>
+                <p className="text-ink-muted mt-0.5 text-sm">Business Reg: {org.profile.registration || '—'}</p>
               </div>
             </div>
             <dl className="flex flex-wrap gap-x-8 gap-y-5 pt-5 sm:gap-y-2.5">
@@ -158,8 +202,8 @@ export function OrganizationSettingsPage() {
                   {org.branches.map((b) => (
                     <tr key={b.id}>
                       <th scope="row" className="text-ink truncate px-4 py-3.5 font-semibold">{b.name}</th>
-                      <td className="text-ink-muted truncate px-2 py-3.5" title={b.address}>{b.address}</td>
-                      <td className="text-ink truncate px-2 py-3.5">{b.manager}</td>
+                      <td className="text-ink-muted truncate px-2 py-3.5" title={b.address}>{b.address || '—'}</td>
+                      <td className="text-ink truncate px-2 py-3.5">{b.manager || '—'}</td>
                       <td className="px-4 py-3.5">
                         <span
                           className={cn(
@@ -191,12 +235,18 @@ export function OrganizationSettingsPage() {
             <ul className="divide-line divide-y">
               {org.hours.map((h) => (
                 <li key={h.day} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                  {/* The inline toggle commits one day by replacing the whole schedule. */}
                   <Toggle
                     leading
                     solidOff
                     label={h.day}
                     checked={h.open}
-                    onChange={(v) => setDayOpen(h.day, v)}
+                    disabled={mutations.setBusinessHours.isPending}
+                    onChange={(open) =>
+                      mutations.setBusinessHours.mutate(
+                        org.hours.map((d) => (d.day === h.day ? { ...d, open } : d)),
+                      )
+                    }
                     labelClassName={cn('font-medium', !h.open && 'text-ink-muted')}
                   />
                   <span className={cn('text-sm whitespace-nowrap', h.open ? 'text-ink-muted' : 'text-ink-subtle')}>
@@ -227,7 +277,7 @@ export function OrganizationSettingsPage() {
                     <div className="min-w-0">
                       <p className="text-ink truncate text-sm font-semibold">{c.name}</p>
                       <p className="text-ink-muted truncate text-xs">
-                        {c.role} • {c.phone}
+                        {c.role || '—'} • {c.phone}
                       </p>
                     </div>
                   </li>
@@ -239,18 +289,18 @@ export function OrganizationSettingsPage() {
       </div>
 
       <Drawer open={dialog === 'profile'} onClose={close} title="Edit profile" placement="center">
-        <ProfileForm profile={org.profile} onDone={close} />
+        <ProfileForm profile={org.profile} mutations={mutations} onDone={close} />
       </Drawer>
       <Drawer open={dialog === 'schedule'} onClose={close} title="Edit schedule" placement="center">
-        <ScheduleForm hours={org.hours} onDone={close} />
+        <ScheduleForm hours={org.hours} mutations={mutations} onDone={close} />
       </Drawer>
       <Drawer open={dialog === 'branch'} onClose={close} title="Add Branch">
-        <BranchForm onDone={close} />
+        <BranchForm mutations={mutations} onDone={close} />
       </Drawer>
       <Drawer open={dialog === 'contact'} onClose={close} title="Add emergency contact" placement="center">
-        <ContactForm onDone={close} />
+        <ContactForm mutations={mutations} onDone={close} />
       </Drawer>
-    </div>
+    </>
   )
 }
 
@@ -330,9 +380,18 @@ function Actions({ onCancel, disabled, label = 'Save' }: { onCancel: () => void;
   )
 }
 
-function ProfileForm({ profile, onDone }: { profile: OrgProfile; onDone: () => void }) {
+function ProfileForm({
+  profile,
+  mutations,
+  onDone,
+}: {
+  profile: OrgProfile
+  mutations: Mutations
+  onDone: () => void
+}) {
   const [draft, setDraft] = useState(profile)
   const set = (patch: Partial<OrgProfile>) => setDraft((d) => ({ ...d, ...patch }))
+  const { updateProfile } = mutations
   const valid = Boolean(draft.name.trim() && draft.registration.trim() && draft.address.trim())
 
   return (
@@ -341,13 +400,17 @@ function ProfileForm({ profile, onDone }: { profile: OrgProfile; onDone: () => v
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        updateProfile({
-          ...draft,
-          name: draft.name.trim(),
-          registration: draft.registration.trim(),
-          address: draft.address.trim(),
-        })
-        onDone()
+        updateProfile.mutate(
+          {
+            legalName: draft.name.trim(),
+            businessRegNumber: draft.registration.trim(),
+            registeredAddress: draft.address.trim(),
+            timezone: draft.timezone,
+            systemLanguage: draft.language,
+            dateFormat: draft.dateFormat,
+          },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Text label="Organization name" value={draft.name} onChange={(name) => set({ name })} error={!draft.name.trim() && 'Enter the registered name.'} />
@@ -365,16 +428,29 @@ function ProfileForm({ profile, onDone }: { profile: OrgProfile; onDone: () => v
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Select label="Timezone" value={draft.timezone} options={timezoneOptions} onChange={(timezone) => set({ timezone })} />
         <Select label="System language" value={draft.language} options={languageOptions} onChange={(language) => set({ language })} />
-        <Select label="System currency" value={draft.currency} options={currencyOptions} onChange={(currency) => set({ currency })} />
+        {/* Currency is naira only and is not edited; shown for parity with the design. */}
+        <Select label="System currency" value={draft.currency} options={currencyOptions} onChange={() => undefined} />
         <Select label="Date format" value={draft.dateFormat} options={dateFormatOptions} onChange={(dateFormat) => set({ dateFormat })} />
       </div>
-      <Actions onCancel={onDone} disabled={!valid} />
+      {updateProfile.isError && (
+        <p className="text-xs text-red-700">{updateProfile.error.message}</p>
+      )}
+      <Actions onCancel={onDone} disabled={!valid || updateProfile.isPending} label={updateProfile.isPending ? 'Saving…' : 'Save'} />
     </form>
   )
 }
 
-function ScheduleForm({ hours, onDone }: { hours: OrgDayHours[]; onDone: () => void }) {
+function ScheduleForm({
+  hours,
+  mutations,
+  onDone,
+}: {
+  hours: OrgDayHours[]
+  mutations: Mutations
+  onDone: () => void
+}) {
   const [draft, setDraft] = useState(hours)
+  const { setBusinessHours } = mutations
   const setDay = (day: string, patch: Partial<OrgDayHours>) =>
     setDraft((d) => d.map((h) => (h.day === day ? { ...h, ...patch } : h)))
   const valid = draft.every(validHours)
@@ -386,8 +462,7 @@ function ScheduleForm({ hours, onDone }: { hours: OrgDayHours[]; onDone: () => v
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        setHours(draft)
-        onDone()
+        setBusinessHours.mutate(draft, { onSuccess: onDone })
       }}
     >
       <ul className="divide-line divide-y">
@@ -429,15 +504,19 @@ function ScheduleForm({ hours, onDone }: { hours: OrgDayHours[]; onDone: () => v
           )
         })}
       </ul>
+      {setBusinessHours.isError && (
+        <p className="pt-2 text-xs text-red-700">{setBusinessHours.error.message}</p>
+      )}
       <div className="pt-3">
-        <Actions onCancel={onDone} disabled={!valid} />
+        <Actions onCancel={onDone} disabled={!valid || setBusinessHours.isPending} label={setBusinessHours.isPending ? 'Saving…' : 'Save'} />
       </div>
     </form>
   )
 }
 
-function BranchForm({ onDone }: { onDone: () => void }) {
+function BranchForm({ mutations, onDone }: { mutations: Mutations; onDone: () => void }) {
   const { users } = useUsers()
+  const { addBranch } = mutations
   const [name, setName] = useState('')
   const [line1, setLine1] = useState('')
   const [line2, setLine2] = useState('')
@@ -449,14 +528,15 @@ function BranchForm({ onDone }: { onDone: () => void }) {
   const setDay = (day: string, patch: Partial<OrgDayHours>) =>
     setBranchHours((d) => d.map((h) => (h.day === day ? { ...h, ...patch } : h)))
 
-  // The manager is picked from the accounts on Users & Permissions; typing
-  // narrows the list, and only a name on it is accepted.
+  // The manager list is picked from the Users accounts for context, but those
+  // local accounts carry no admin uuid, so the branch manager cannot be sent to
+  // the backend yet; a chosen name stays blank on the saved branch.
   const managerUser = users.find((u) => u.name.toLowerCase() === manager.trim().toLowerCase())
   const managerError = manager.trim() !== '' && !managerUser && 'Choose a user from the list.'
   const phoneError = phone !== '' && !validPhone(phone) && 'Enter a phone number of 7 to 15 digits.'
   const valid =
-    Boolean(name.trim() && line1.trim() && city.trim() && managerUser) &&
-    validPhone(phone) &&
+    Boolean(name.trim() && line1.trim() && city.trim()) &&
+    (phone === '' || validPhone(phone)) &&
     hours.every(validHours)
   const label = 'text-ink text-sm font-semibold'
   const timeClass =
@@ -467,18 +547,19 @@ function BranchForm({ onDone }: { onDone: () => void }) {
       className="flex min-h-full flex-col"
       onSubmit={(e) => {
         e.preventDefault()
-        if (!valid || !managerUser) return
-        addBranch({
-          name: name.trim(),
-          address: [line1.trim(), line2.trim()].filter(Boolean).join(', '),
-          manager: managerUser.name,
-          active: true,
-          city: city.trim(),
-          state,
-          phone: phone.trim(),
-          hours,
-        })
-        onDone()
+        if (!valid) return
+        addBranch.mutate(
+          {
+            name: name.trim(),
+            addressLine1: line1.trim(),
+            addressLine2: line2.trim() || undefined,
+            city: city.trim(),
+            state,
+            phone: phone.trim() || undefined,
+            businessHours: hours,
+          },
+          { onSuccess: onDone },
+        )
       }}
     >
       <div className="flex-1 space-y-4 p-5">
@@ -590,6 +671,7 @@ function BranchForm({ onDone }: { onDone: () => void }) {
             })}
           </ul>
         </fieldset>
+        {addBranch.isError && <p className="text-xs text-red-700">{addBranch.error.message}</p>}
       </div>
       <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
         <button
@@ -601,20 +683,22 @@ function BranchForm({ onDone }: { onDone: () => void }) {
         </button>
         <button
           type="submit"
-          disabled={!valid}
+          disabled={!valid || addBranch.isPending}
           className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
         >
-          Save Branch
+          {addBranch.isPending ? 'Saving…' : 'Save Branch'}
         </button>
       </div>
     </form>
   )
 }
 
-function ContactForm({ onDone }: { onDone: () => void }) {
+function ContactForm({ mutations, onDone }: { mutations: Mutations; onDone: () => void }) {
+  const { addContact } = mutations
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
   const [phone, setPhone] = useState('')
+  // The backend has no contact kind; the field drives only the local icon split.
   const [kind, setKind] = useState<ContactKind>('medical')
   const phoneOk = validPhone(phone)
   const valid = Boolean(name.trim() && role.trim() && phoneOk)
@@ -625,8 +709,10 @@ function ContactForm({ onDone }: { onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        addContact({ name: name.trim(), role: role.trim(), phone: phone.trim(), kind })
-        onDone()
+        addContact.mutate(
+          { name: name.trim(), role: role.trim(), phone: phone.trim() },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Text label="Name" value={name} onChange={setName} />
@@ -645,7 +731,8 @@ function ContactForm({ onDone }: { onDone: () => void }) {
           <option value="security">Security</option>
         </SelectBox>
       </label>
-      <Actions onCancel={onDone} disabled={!valid} label="Add Contact" />
+      {addContact.isError && <p className="text-xs text-red-700">{addContact.error.message}</p>}
+      <Actions onCancel={onDone} disabled={!valid || addContact.isPending} label={addContact.isPending ? 'Saving…' : 'Add Contact'} />
     </form>
   )
 }
