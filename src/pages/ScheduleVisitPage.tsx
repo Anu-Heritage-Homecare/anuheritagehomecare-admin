@@ -1,72 +1,89 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ChevronRight, TriangleAlert } from 'lucide-react'
-import { recipients } from '@/features/care-recipients/data'
-import { addUnassignedVisit, formatTime } from '@/features/scheduling/board-data'
-import { serviceTypes } from '@/features/scheduling/settings-data'
+import { ChevronRight, Loader2, TriangleAlert } from 'lucide-react'
+import {
+  useRecipientOptions,
+  visitTypeOptions,
+} from '@/features/scheduling/useScheduleVisitForm'
+import { useSchedulingMutations } from '@/features/scheduling/useSchedulingMutations'
+import { formatTime, minutesOfClock, todayIso } from '@/features/scheduling/date-util'
 import { Field } from '@/components/ui/Field'
 import { fieldControl } from '@/lib/field-classes'
-import { TODAY } from '@/lib/today'
 import { SelectBox } from '@/components/ui/SelectBox'
 
 /*
- * Schedule Visit. There is no Figma for it. A visit is created with the fields
- * the rota already carries (recipient, type, date, start, duration) and joins
- * the unassigned pool; "Save & Assign Caregiver" then opens the existing
- * Assign Caregiver page, so matching and eligibility checks live in one place.
- * Opened from a recipient's profile, the recipient comes preselected.
+ * Schedule Visit. A visit is created through POST /admin/scheduling/visits with
+ * the fields the backend accepts (recipient, type, date, start, duration). It
+ * lands PENDING and unassigned; "Save & Assign Caregiver" then opens the Assign
+ * Caregiver page. Opened from a recipient's profile, the recipient comes
+ * preselected.
  */
 
 const durations = [0.5, 1, 1.5, 2, 3, 4, 6, 8, 12]
 const durationLabel = (h: number) => (h < 1 ? '30 minutes' : `${h} ${h === 1 ? 'hour' : 'hours'}`)
 
 function endOf(start: string, hours: number): string {
-  const [h, m] = start.split(':').map(Number)
-  const total = h * 60 + m + Math.round(hours * 60)
+  const total = minutesOfClock(start) + Math.round(hours * 60)
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
 export function ScheduleVisitPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const from = recipients.find((r) => r.id === params.get('recipient'))
-  const eligible = recipients.filter((r) => r.status !== 'discharged')
-  const types = useMemo(() => serviceTypes(), [])
+  const today = todayIso()
+  const recipientsQuery = useRecipientOptions()
+  const { create } = useSchedulingMutations()
 
-  const [recipientId, setRecipientId] = useState(from && from.status !== 'discharged' ? from.id : '')
+  const recipients = recipientsQuery.data ?? []
+  const fromId = params.get('recipient')
+  const from = recipients.find((r) => r.id === fromId)
+  const eligible = recipients.filter((r) => r.status !== 'DISCHARGED')
+
+  const [recipientId, setRecipientId] = useState('')
   const [type, setType] = useState('')
-  const [date, setDate] = useState(TODAY)
+  const [date, setDate] = useState(today)
   const [start, setStart] = useState('09:00')
   const [hours, setHours] = useState(1)
   const [notes, setNotes] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
-  const recipient = recipients.find((r) => r.id === recipientId)
+  // Preselect the recipient the page was opened for, once the list arrives.
+  const activeRecipientId = recipientId || (from && from.status !== 'DISCHARGED' ? from.id : '')
+  const recipient = recipients.find((r) => r.id === activeRecipientId)
+
   const errors = {
-    recipient: recipientId ? undefined : 'Choose who the visit is for.',
+    recipient: activeRecipientId ? undefined : 'Choose who the visit is for.',
     type: type ? undefined : 'Choose the type of visit.',
-    date: /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= TODAY ? undefined : 'Choose today or a later date.',
+    date:
+      /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today
+        ? undefined
+        : 'Choose today or a later date.',
     start: /^\d{2}:\d{2}$/.test(start) ? undefined : 'Enter a start time.',
   }
   const invalid = Object.values(errors).some(Boolean)
   const show = (k: keyof typeof errors) => (submitted ? errors[k] : undefined)
   const overnight = /^\d{2}:\d{2}$/.test(start) && endOf(start, hours) <= start
 
-  // Back to where the page was opened from.
   const back = from ? `/care-recipients/${from.id}/overview` : '/scheduling'
 
   const save = (assign: boolean) => {
     setSubmitted(true)
     if (invalid || !recipient) return
-    const id = addUnassignedVisit({
-      date,
-      start,
-      durationHours: hours,
-      recipientId: recipient.id,
-      type,
-      reason: notes.trim() || 'New visit, awaiting a caregiver',
-    })
-    navigate(assign ? `/scheduling/visits/${id}/assign` : '/scheduling?view=unassigned')
+    const startMinute = minutesOfClock(start)
+    create.mutate(
+      {
+        careRecipientId: recipient.id,
+        scheduledDate: date,
+        startMinute,
+        endMinute: startMinute + Math.round(hours * 60),
+        visitType: type,
+        specialInstructions: notes.trim() ? [notes.trim()] : undefined,
+      },
+      {
+        onSuccess: ({ id }) =>
+          navigate(assign ? `/scheduling/visits/${id}/assign` : '/scheduling?view=unassigned'),
+      },
+    )
   }
 
   return (
@@ -82,79 +99,178 @@ export function ScheduleVisitPage() {
         <ol className="text-ink-muted flex flex-wrap items-center gap-1.5 text-sm">
           {from ? (
             <>
-              <li><Link to="/care-recipients" className="hover:text-ink">Care Recipients</Link></li>
-              <li aria-hidden="true"><ChevronRight className="size-3.5" strokeWidth={2.4} /></li>
-              <li><Link to={back} className="hover:text-ink">{from.name}</Link></li>
+              <li>
+                <Link to="/care-recipients" className="hover:text-ink">
+                  Care Recipients
+                </Link>
+              </li>
+              <li aria-hidden="true">
+                <ChevronRight className="size-3.5" strokeWidth={2.4} />
+              </li>
+              <li>
+                <Link to={back} className="hover:text-ink">
+                  {from.name}
+                </Link>
+              </li>
             </>
           ) : (
-            <li><Link to="/scheduling" className="hover:text-ink">Scheduling</Link></li>
+            <li>
+              <Link to="/scheduling" className="hover:text-ink">
+                Scheduling
+              </Link>
+            </li>
           )}
-          <li aria-hidden="true"><ChevronRight className="size-3.5" strokeWidth={2.4} /></li>
-          <li className="text-ink" aria-current="page">Schedule Visit</li>
+          <li aria-hidden="true">
+            <ChevronRight className="size-3.5" strokeWidth={2.4} />
+          </li>
+          <li className="text-ink" aria-current="page">
+            Schedule Visit
+          </li>
         </ol>
       </nav>
 
       <header className="-mt-4">
         <h1 className="text-ink text-2xl font-bold tracking-tight">Schedule Visit</h1>
-        <p className="text-ink-muted mt-1 text-sm">
-          Book a visit, then match a caregiver to it.
-        </p>
+        <p className="text-ink-muted mt-1 text-sm">Book a visit, then match a caregiver to it.</p>
       </header>
 
       {submitted && invalid && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
+        >
           Some details are missing before this visit can be scheduled.
+        </div>
+      )}
+
+      {create.isError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
+        >
+          {create.error.message}
         </div>
       )}
 
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <section aria-labelledby="visit-details" className="card p-5 sm:p-6">
-          <h2 id="visit-details" className="text-ink text-base font-semibold tracking-tight">Visit Details</h2>
+          <h2 id="visit-details" className="text-ink text-base font-semibold tracking-tight">
+            Visit Details
+          </h2>
           <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
             <Field label="Care Recipient" error={show('recipient')} className="sm:col-span-2">
               {(p) => (
-                <SelectBox {...p} className={fieldControl} value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>
-                  <option value="">Select a care recipient</option>
+                <SelectBox
+                  {...p}
+                  className={fieldControl}
+                  value={activeRecipientId}
+                  disabled={recipientsQuery.isPending}
+                  onChange={(e) => setRecipientId(e.target.value)}
+                >
+                  <option value="">
+                    {recipientsQuery.isPending ? 'Loading recipients…' : 'Select a care recipient'}
+                  </option>
                   {eligible.map((r) => (
-                    <option key={r.id} value={r.id}>{r.name} ({r.ref})</option>
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.code})
+                    </option>
                   ))}
                 </SelectBox>
               )}
             </Field>
             <Field label="Visit Type" error={show('type')} className="sm:col-span-2">
               {(p) => (
-                <SelectBox {...p} className={fieldControl} value={type} onChange={(e) => setType(e.target.value)}>
+                <SelectBox
+                  {...p}
+                  className={fieldControl}
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                >
                   <option value="">Select a visit type</option>
-                  {types.map((t) => <option key={t}>{t}</option>)}
+                  {visitTypeOptions.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
                 </SelectBox>
               )}
             </Field>
             <Field label="Date" error={show('date')}>
-              {(p) => <input {...p} type="date" min={TODAY} className={fieldControl} value={date} onChange={(e) => setDate(e.target.value)} />}
+              {(p) => (
+                <input
+                  {...p}
+                  type="date"
+                  min={today}
+                  className={fieldControl}
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              )}
             </Field>
             <Field label="Start Time" error={show('start')}>
-              {(p) => <input {...p} type="time" className={fieldControl} value={start} onChange={(e) => setStart(e.target.value)} />}
+              {(p) => (
+                <input
+                  {...p}
+                  type="time"
+                  className={fieldControl}
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                />
+              )}
             </Field>
             <Field label="Duration">
               {(p) => (
-                <SelectBox {...p} className={fieldControl} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
-                  {durations.map((h) => <option key={h} value={h}>{durationLabel(h)}</option>)}
+                <SelectBox
+                  {...p}
+                  className={fieldControl}
+                  value={hours}
+                  onChange={(e) => setHours(Number(e.target.value))}
+                >
+                  {durations.map((h) => (
+                    <option key={h} value={h}>
+                      {durationLabel(h)}
+                    </option>
+                  ))}
                 </SelectBox>
               )}
             </Field>
             <Field label="Ends At">
-              {(p) => <input {...p} readOnly className={`${fieldControl} bg-sunken`} value={/^\d{2}:\d{2}$/.test(start) ? `${formatTime(endOf(start, hours))}${overnight ? ' (next day)' : ''}` : ''} />}
-            </Field>
-            <Field label="Notes for the caregiver" hint="Optional. Shown with the visit while it is unassigned." className="sm:col-span-2">
               {(p) => (
-                <textarea {...p} rows={3} maxLength={200} className={`${fieldControl} h-auto py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <input
+                  {...p}
+                  readOnly
+                  className={`${fieldControl} bg-sunken`}
+                  value={
+                    /^\d{2}:\d{2}$/.test(start)
+                      ? `${formatTime(endOf(start, hours))}${overnight ? ' (next day)' : ''}`
+                      : ''
+                  }
+                />
+              )}
+            </Field>
+            <Field
+              label="Notes for the caregiver"
+              hint="Optional. Saved as a special instruction on the visit."
+              className="sm:col-span-2"
+            >
+              {(p) => (
+                <textarea
+                  {...p}
+                  rows={3}
+                  maxLength={300}
+                  className={`${fieldControl} h-auto py-2`}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
               )}
             </Field>
           </div>
         </section>
 
         <aside aria-labelledby="visit-recipient" className="card space-y-3 p-5 sm:p-6">
-          <h2 id="visit-recipient" className="text-ink text-base font-semibold tracking-tight">Care Recipient</h2>
+          <h2 id="visit-recipient" className="text-ink text-base font-semibold tracking-tight">
+            Care Recipient
+          </h2>
           {recipient ? (
             <dl className="divide-line divide-y text-sm">
               {[
@@ -172,7 +288,7 @@ export function ScheduleVisitPage() {
           ) : (
             <p className="text-ink-muted text-sm">Choose a care recipient to see their details.</p>
           )}
-          {recipient?.status === 'on-hold' && (
+          {recipient?.status === 'ON_HOLD' && (
             <p className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <TriangleAlert className="mt-0.5 size-4 shrink-0" strokeWidth={2.2} aria-hidden="true" />
               Care is on hold for {recipient.name}. Check with the coordinator before booking.
@@ -190,15 +306,18 @@ export function ScheduleVisitPage() {
         </Link>
         <button
           type="button"
+          disabled={create.isPending}
           onClick={() => save(false)}
-          className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+          className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium disabled:opacity-50"
         >
           Save as Unassigned
         </button>
         <button
           type="submit"
-          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+          disabled={create.isPending}
+          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white disabled:opacity-50"
         >
+          {create.isPending && <Loader2 className="size-4 animate-spin" strokeWidth={2} />}
           Save &amp; Assign Caregiver
         </button>
       </div>
