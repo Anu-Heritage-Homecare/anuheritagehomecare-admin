@@ -9,6 +9,7 @@ import {
   languageOptions,
   nigerianStates,
   timezoneOptions,
+  useBranchManagerOptions,
   useOrganization,
   useOrganizationMutations,
   validHours,
@@ -20,7 +21,6 @@ import type {
   OrgDayHours,
   OrgProfile,
 } from '@/features/settings/organization'
-import { useUsers } from '@/features/settings/users'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
 import { cn } from '@/lib/cn'
@@ -515,7 +515,7 @@ function ScheduleForm({
 }
 
 function BranchForm({ mutations, onDone }: { mutations: Mutations; onDone: () => void }) {
-  const { users } = useUsers()
+  const { data: managers = [] } = useBranchManagerOptions()
   const { addBranch } = mutations
   const [name, setName] = useState('')
   const [line1, setLine1] = useState('')
@@ -528,10 +528,8 @@ function BranchForm({ mutations, onDone }: { mutations: Mutations; onDone: () =>
   const setDay = (day: string, patch: Partial<OrgDayHours>) =>
     setBranchHours((d) => d.map((h) => (h.day === day ? { ...h, ...patch } : h)))
 
-  // The manager list is picked from the Users accounts for context, but those
-  // local accounts carry no admin uuid, so the branch manager cannot be sent to
-  // the backend yet; a chosen name stays blank on the saved branch.
-  const managerUser = users.find((u) => u.name.toLowerCase() === manager.trim().toLowerCase())
+  // The chosen name resolves to an admin user id, which is what the branch stores.
+  const managerUser = managers.find((u) => u.fullName.toLowerCase() === manager.trim().toLowerCase())
   const managerError = manager.trim() !== '' && !managerUser && 'Choose a user from the list.'
   const phoneError = phone !== '' && !validPhone(phone) && 'Enter a phone number of 7 to 15 digits.'
   const valid =
@@ -556,6 +554,7 @@ function BranchForm({ mutations, onDone }: { mutations: Mutations; onDone: () =>
             city: city.trim(),
             state,
             phone: phone.trim() || undefined,
+            managerId: managerUser?.id,
             businessHours: hours,
           },
           { onSuccess: onDone },
@@ -615,9 +614,9 @@ function BranchForm({ mutations, onDone }: { mutations: Mutations; onDone: () =>
               className={cn(fieldClass, managerError && 'border-red-500')}
             />
             <datalist id="branch-manager-options">
-              {users.filter((u) => u.active).map((u) => (
-                <option key={u.id} value={u.name}>
-                  {u.role} · {u.branch}
+              {managers.map((u) => (
+                <option key={u.id} value={u.fullName}>
+                  {u.roleName || '—'}
                 </option>
               ))}
             </datalist>

@@ -238,6 +238,38 @@ export function useOrganization() {
   })
 }
 
+/* --------------------------- branch manager picker ------------------------- */
+
+/** One admin account the branch manager picker offers. */
+export interface ManagerOption {
+  id: string
+  fullName: string
+  roleName: string
+}
+
+interface AdminUsersScreenDto {
+  users: { id: string; fullName: string; roleName: string | null }[]
+}
+
+/**
+ * The admin accounts, for the branch manager picker. Backed by `GET /admin/users`
+ * and sharing the Users tab's `['admin', 'users']` cache (so it is fetched once).
+ * The cache holds the raw screen DTO; `select` maps it to the id, name and role
+ * the picker needs. One page of 100 is plenty for a picker.
+ */
+export function useBranchManagerOptions() {
+  return useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: () => api.get<AdminUsersScreenDto>('/admin/users?pageSize=100'),
+    select: (screen): ManagerOption[] =>
+      screen.users.map((u) => ({
+        id: u.id,
+        fullName: u.fullName,
+        roleName: u.roleName ?? '',
+      })),
+  })
+}
+
 /* -------------------------------- writes ---------------------------------- */
 
 /** The profile fields the Edit Profile form sends. Currency maps back to the enum. */
@@ -257,6 +289,8 @@ export interface NewBranch {
   city: string
   state: string
   phone?: string
+  /** The admin user who manages this branch, as an admin user id. */
+  managerId?: string
   businessHours: OrgDayHours[]
 }
 
@@ -294,6 +328,7 @@ export function useOrganizationMutations() {
         city: branch.city,
         state: branch.state,
         phone: branch.phone || undefined,
+        managerId: branch.managerId || undefined,
         businessHours: fromDayHours(branch.businessHours),
       }),
     onSuccess: invalidate,
