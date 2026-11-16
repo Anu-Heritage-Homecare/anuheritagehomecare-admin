@@ -82,9 +82,9 @@ export function CareRecipientsPage() {
 
       <AddRecipientDrawer
         open={adding}
-        onClose={(recipient) => {
+        onClose={(created) => {
           setAdding(false)
-          if (recipient) {
+          if (created) {
             setPage(1)
             void refetch()
           }
