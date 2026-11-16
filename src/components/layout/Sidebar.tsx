@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { X } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { navItems } from './nav'
 import type { NavChild } from './nav'
 import { Logo } from './Logo'
 import { Avatar } from '@/components/ui/Avatar'
+import { useAuth, roleLabel } from '@/lib/auth-context'
 import { LG_QUERY, useMediaQuery } from '@/lib/useMediaQuery'
 import { cn } from '@/lib/cn'
 
@@ -62,6 +64,7 @@ function SubNav({
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { pathname } = useLocation()
+  const { admin, signOut } = useAuth()
   const panelRef = useRef<HTMLElement>(null)
   const isDesktop = useMediaQuery(LG_QUERY)
 
@@ -202,17 +205,20 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="shrink-0 p-3">
           <button
             type="button"
+            onClick={() => void signOut()}
+            aria-label={`${admin?.fullName ?? 'Account'}, sign out`}
             className="border-control hover:bg-sunken flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors"
           >
-            <Avatar name="Sarah Jenkins" decorative className="size-9" />
-            <span className="min-w-0">
+            <Avatar name={admin?.fullName ?? 'Admin'} decorative className="size-9" />
+            <span className="min-w-0 flex-1">
               <span className="text-ink block truncate text-sm font-semibold">
-                Sarah Jenkins
+                {admin?.fullName ?? 'Admin'}
               </span>
               <span className="text-ink-subtle block truncate text-xs">
-                Operations Manager
+                {admin ? roleLabel(admin.role) : ''}
               </span>
             </span>
+            <LogOut className="text-ink-subtle size-4 shrink-0" strokeWidth={1.8} />
           </button>
         </div>
       </aside>

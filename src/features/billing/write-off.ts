@@ -57,6 +57,8 @@ export function writeOff(
     kind: 'write-off',
     type: writeOffType[reason],
     accountId: invoice.accountId,
+    // Mock fixture path: the local ledger is Nigeria only today.
+    currency: 'NGN',
     invoice: invoice.number,
     amount,
     at: today,

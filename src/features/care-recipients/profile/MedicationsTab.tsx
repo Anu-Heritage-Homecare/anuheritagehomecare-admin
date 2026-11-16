@@ -1,12 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { PillBottle } from 'lucide-react'
+import { Loader2, PillBottle } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
-import {
-  getMedicationPlan,
-  sortPrescriptions,
-  type MedicationSort,
-} from '../medications-data'
+import { sortPrescriptions, type MedicationSort } from '../medications-data'
+import { useRecipientMedications } from '../useRecipientMedications'
 import { MedicationStats } from './MedicationStats'
 import { MedicationList } from './MedicationList'
 import {
@@ -17,7 +14,9 @@ import {
 
 export function MedicationsTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const plan = getMedicationPlan(profile.id)
+  const { data: plan, isPending, isError, error, refetch } = useRecipientMedications(
+    profile.id,
+  )
   const [sort, setSort] = useState<MedicationSort>('newest')
 
   const prescriptions = useMemo(
@@ -25,7 +24,32 @@ export function MedicationsTab() {
     [plan, sort],
   )
 
-  if (!plan) {
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading medications…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load medications</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (plan.prescriptions.length === 0) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
         <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">

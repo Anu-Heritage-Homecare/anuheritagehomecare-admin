@@ -211,7 +211,7 @@ function PaymentForm({
         </button>
       </div>
       <span className="sr-only" aria-live="polite">
-        {invoice ? `Balance ${formatMoney(balance)}` : ''}
+        {invoice ? `Balance ${formatMoney(balance, 'NGN')}` : ''}
       </span>
     </form>
   )

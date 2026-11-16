@@ -1,25 +1,15 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Plus, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Plus, Star } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { ALL, formatPeriod, periodFor, periodOptions } from '@/features/reports/operations'
+import { periodOptions } from '@/features/reports/operations'
 import type { PeriodId } from '@/features/reports/operations'
 import {
   RENEWAL_HORIZON_DAYS,
-  attendanceTrend,
-  branches,
-  caregivers,
-  complianceSplit,
-  employmentTypes,
-  expiringCredentials,
-  flagged,
-  membersFor,
-  rankings,
-  ratingDistribution,
+  formatWorkforcePeriod,
   renewalLabels,
-  summary,
-  weeklyUtilisation,
-} from '@/features/reports/workforce'
-import type { RenewalState, WorkforceFilters } from '@/features/reports/workforce'
+  useWorkforceReport,
+} from '@/features/reports/useWorkforceReport'
+import type { RenewalState, WorkforceReportView } from '@/features/reports/useWorkforceReport'
 import { TrendLine } from '@/features/reports/TrendLine'
 import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
@@ -39,10 +29,9 @@ const scoreText = (n: number | null) => (n === null ? '—' : n.toFixed(1))
 const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric', timeZone: 'UTC' })
 
 /**
- * The design's filter field: a white control as wide as the words on it, dark
- * value, chevron at the right. `shown` is what the field reads; the real
- * SelectBox lies over it at zero opacity, so the shared picker and keyboard
- * handling are kept. 44px tall below `sm`, where a finger is the pointer.
+ * The design's reporting-period field: a white control as wide as the words on
+ * it, dark value, chevron at the right. The real SelectBox lies over it at zero
+ * opacity, so the shared picker and keyboard handling are kept.
  */
 function FilterField({
   label,
@@ -140,70 +129,45 @@ function daysText(days: number): string {
   return `Expires in ${days} ${days === 1 ? 'day' : 'days'}`
 }
 
-/* ---------------------------------- page ---------------------------------- */
+/* ------------------------------- the report ------------------------------- */
 
-export function WorkforceReportPage() {
-  const [params, setParams] = useSearchParams()
-  const periodId = pick(params.get('period'), periodOptions.map((o) => o.value), '30') as PeriodId
-  const filters: WorkforceFilters = {
-    branch: pick(params.get('branch'), [ALL, ...branches], ALL),
-    caregiver: pick(params.get('caregiver'), [ALL, ...caregivers.map((c) => c.id)], ALL),
-    employment: pick(params.get('employment'), [ALL, ...employmentTypes], ALL),
-  }
-
-  const setParam = (key: string, value: string, fallback: string) => {
-    const next = new URLSearchParams(params)
-    if (value === fallback) next.delete(key)
-    else next.set(key, value)
-    setParams(next, { replace: true })
-  }
-
-  const period = periodFor(periodId)
-  const members = membersFor(filters)
-  const s = summary(members, period)
-  const weeks = weeklyUtilisation(members, period)
-  const attendance = attendanceTrend(members, period)
-  const dist = ratingDistribution(members)
-  const ranks = rankings(members, period)
-  const split = complianceSplit(members)
-  const expiring = expiringCredentials(members)
-  const flags = flagged(members, period)
+function Report({ view, periodId, onPeriod }: { view: WorkforceReportView; periodId: PeriodId; onPeriod: (id: PeriodId) => void }) {
+  const { period, kpis: s, weeks, attendance, bands, unrated, rankings: ranks, compliance: split, expiring, flags } = view
 
   const tiles: { label: string; value: string; badge: string; tone: keyof typeof pill }[] = [
-    { label: 'Active Caregivers', value: String(s.active), badge: `${s.active} of ${s.headcount} rostrable`, tone: 'green' },
+    { label: 'Active Caregivers', value: String(s.active), badge: s.headcount === null ? `${s.active} active` : `${s.active} of ${s.headcount} rostrable`, tone: 'green' },
     { label: 'Utilization Rate', value: pctText(s.utilisation), badge: 'Rostered ÷ available', tone: 'blue' },
-    { label: 'Attendance Rate', value: rateText(s.attendance), badge: `${s.attended} of ${s.logged} logged visits`, tone: 'green' },
+    { label: 'Attendance Rate', value: rateText(s.attendance), badge: 'logged visits', tone: 'green' },
     {
       label: 'Avg Performance',
       value: s.avgRating === null ? '—' : `${s.avgRating} / 5.0`,
-      badge: `${s.rated} rated`,
+      badge: 'care team ratings',
       tone: 'amber',
     },
-    { label: 'Training Compliance', value: pctText(s.training), badge: `${s.coursesDone} of ${s.courses} courses`, tone: 'blue' },
+    { label: 'Training Compliance', value: pctText(s.training), badge: `${split.compliant} of ${split.compliant + split.overdue} compliant`, tone: 'blue' },
   ]
 
   const exportCsv = () => {
     const rows: string[][] = [
-      ['Workforce report', formatPeriod(period)],
-      ['Branch', filters.branch, 'Caregiver', filters.caregiver, 'Employment type', filters.employment],
+      ['Workforce report', formatWorkforcePeriod(period)],
       [],
       ['Measure', 'Value'],
       ...tiles.map((t) => [t.label, t.value]),
       [],
-      ['Week', 'From', 'To', 'Utilization (%)'],
-      ...weeks.map((w) => [w.label, w.from, w.to, String(w.value ?? '')]),
+      ['Week', 'Utilization (%)'],
+      ...weeks.map((w) => [w.label, String(w.value ?? '')]),
       [],
       ['Date', 'Attendance (%)'],
       ...attendance.map((a) => [a.date, String(a.value)]),
       [],
       ['Rank', 'Caregiver', 'Rating', 'Visits completed', 'On-time (%)', 'Attendance (%)', 'CSAT'],
-      ...ranks.map((r, i) => [String(i + 1), r.member.name, String(r.rating ?? ''), String(r.completed), String(r.onTime ?? ''), String(r.attendance ?? ''), String(r.csat ?? '')]),
+      ...ranks.map((r, i) => [String(i + 1), r.name, String(r.rating ?? ''), String(r.completed), String(r.onTime ?? ''), String(r.attendance ?? ''), String(r.csat ?? '')]),
       [],
       ['Caregiver', 'Credential', 'Expires', 'Status'],
-      ...expiring.map((e) => [e.member.name, e.name, e.expiresAt, renewalLabels[e.state]]),
+      ...expiring.map((e) => [e.caregiverName, e.name, e.expiresAt, renewalLabels[e.state]]),
       [],
       ['Flagged', 'Reason'],
-      ...flags.map((f) => [f.member.name, f.reason]),
+      ...flags.map((f) => [f.name, f.reason]),
     ]
     const csv = rows.map((r) => r.map(csvField).join(',')).join('\r\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
@@ -214,12 +178,6 @@ export function WorkforceReportPage() {
     URL.revokeObjectURL(url)
   }
 
-  const filterControls: { key: keyof WorkforceFilters; label: string; options: { value: string; label: string }[] }[] = [
-    { key: 'branch', label: 'Branch', options: [{ value: ALL, label: 'All Branches' }, ...branches.map((b) => ({ value: b, label: b }))] },
-    { key: 'caregiver', label: 'Caregiver', options: [{ value: ALL, label: 'All Caregivers' }, ...caregivers.map((m) => ({ value: m.id, label: m.name }))] },
-    { key: 'employment', label: 'Employment Type', options: [{ value: ALL, label: 'All Types' }, ...employmentTypes.map((t) => ({ value: t, label: t }))] },
-  ]
-
   const attendanceValues = attendance.map((a) => a.value)
   const attendanceRange =
     attendanceValues.length === 0
@@ -227,17 +185,7 @@ export function WorkforceReportPage() {
       : ` (Range ${Math.min(...attendanceValues)}% – ${Math.max(...attendanceValues)}%)`
 
   return (
-    <div className="space-y-6">
-      <nav aria-label="Breadcrumb" className="text-ink-subtle flex items-center gap-1.5 text-xs print:hidden">
-        <Link to="/reports" className="hover:text-ink">
-          Reports
-        </Link>
-        <ChevronRight className="size-3" aria-hidden="true" />
-        <span aria-current="page" className="text-brand-700 font-medium">
-          Workforce Report
-        </span>
-      </nav>
-
+    <>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-ink text-2xl font-bold tracking-tight sm:text-3xl">Workforce Report</h1>
@@ -259,29 +207,13 @@ export function WorkforceReportPage() {
         </div>
       </header>
 
-      <div className="card flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid grid-cols-1 gap-x-5 gap-y-3 min-[480px]:grid-cols-3 lg:flex lg:flex-wrap">
-          {filterControls.map((c) => (
-            <div key={c.key}>
-              <p className="text-ink-subtle mb-1.5 text-[0.6875rem] font-medium tracking-wide uppercase" aria-hidden="true">
-                {c.label}
-              </p>
-              <FilterField
-                label={c.label}
-                shown={c.options.find((o) => o.value === filters[c.key])?.label ?? ''}
-                value={filters[c.key]}
-                onChange={(v) => setParam(c.key, v, ALL)}
-                options={c.options}
-              />
-            </div>
-          ))}
-        </div>
+      <div className="card flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-end">
         {/* One field, as drawn: it reads the dates, and picks among the presets. */}
         <FilterField
           label="Reporting period"
-          shown={formatPeriod(period)}
+          shown={formatWorkforcePeriod(period)}
           value={periodId}
-          onChange={(v) => setParam('period', v, '30')}
+          onChange={(v) => onPeriod(v as PeriodId)}
           options={periodOptions}
         />
       </div>
@@ -341,7 +273,7 @@ export function WorkforceReportPage() {
 
       <Card title="Performance Rating Distribution" description="Classification of caregivers by the ratings recorded on their care teams.">
         <ul className="space-y-5">
-          {dist.bands.map((b) => (
+          {bands.map((b) => (
             <li key={b.id} className="grid grid-cols-[minmax(0,9rem)_1fr] items-center gap-x-4 gap-y-2 sm:grid-cols-[10rem_1fr_11rem]">
               <div>
                 <p className="text-ink text-sm font-medium">{b.label}</p>
@@ -359,9 +291,9 @@ export function WorkforceReportPage() {
             </li>
           ))}
         </ul>
-        {dist.unrated > 0 && (
+        {unrated > 0 && (
           <p className="text-ink-subtle mt-4 text-xs">
-            {dist.unrated} {dist.unrated === 1 ? 'caregiver has' : 'caregivers have'} no rating recorded yet.
+            {unrated} {unrated === 1 ? 'caregiver has' : 'caregivers have'} no rating recorded yet.
           </p>
         )}
       </Card>
@@ -390,12 +322,12 @@ export function WorkforceReportPage() {
             </thead>
             <tbody className="divide-line divide-y">
               {ranks.map((r, i) => (
-                <tr key={r.member.id}>
+                <tr key={r.id}>
                   <td className="text-ink-muted py-3 pr-3 pl-5 tabular-nums sm:pl-6">{i + 1}</td>
                   <th scope="row" className="px-3 py-3 font-semibold">
-                    <Link to={`/caregivers/${r.member.id}/performance`} className="text-ink hover:text-brand-700 flex items-center gap-2.5 whitespace-nowrap">
-                      <Avatar name={r.member.name} decorative className="size-8" />
-                      {r.member.name}
+                    <Link to={`/caregivers/${r.id}/performance`} className="text-ink hover:text-brand-700 flex items-center gap-2.5 whitespace-nowrap">
+                      <Avatar name={r.name} decorative className="size-8" />
+                      {r.name}
                     </Link>
                   </th>
                   <td className="text-ink px-3 py-3 font-semibold whitespace-nowrap tabular-nums">
@@ -427,8 +359,8 @@ export function WorkforceReportPage() {
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         <Card title="Training & Compliance Status" description="Caregivers whose required credentials are all in date.">
-          {members.length === 0 ? (
-            <p className="text-ink-muted py-8 text-center text-sm">No caregivers match these filters.</p>
+          {split.compliant + split.overdue === 0 ? (
+            <p className="text-ink-muted py-8 text-center text-sm">No caregivers in this period.</p>
           ) : (
             <div className="flex flex-wrap items-center gap-6">
               <div className="relative size-32 shrink-0">
@@ -472,9 +404,9 @@ export function WorkforceReportPage() {
           ) : (
             <ul className="divide-line divide-y">
               {expiring.map((e) => (
-                <li key={`${e.member.id}-${e.name}`} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[1fr_9rem_auto]">
+                <li key={e.id} className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[1fr_9rem_auto]">
                   <div className="min-w-0">
-                    <p className="text-ink truncate text-sm font-semibold">{e.member.name}</p>
+                    <p className="text-ink truncate text-sm font-semibold">{e.caregiverName}</p>
                     <p className="text-ink-subtle truncate text-xs">{e.name}</p>
                   </div>
                   <div className="text-xs max-sm:order-3 max-sm:col-span-2">
@@ -501,16 +433,16 @@ export function WorkforceReportPage() {
           <ul className="space-y-3">
             {flags.map((f) => (
               <li
-                key={f.member.id}
+                key={f.id}
                 className={cn(
                   'flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-l-4 py-4 pr-5 pl-4',
                   f.severity === 'red' ? 'border-red-400' : 'border-amber-400',
                 )}
               >
-                <Avatar name={f.member.name} decorative className="size-11" />
+                <Avatar name={f.name} decorative className="size-11" />
                 <div className="min-w-0 flex-1">
-                  <Link to={`/caregivers/${f.member.id}/performance`} className="text-ink hover:text-brand-700 text-[0.9375rem] leading-snug font-semibold">
-                    {f.member.name}
+                  <Link to={`/caregivers/${f.id}/performance`} className="text-ink hover:text-brand-700 text-[0.9375rem] leading-snug font-semibold">
+                    {f.name}
                   </Link>
                   <p className={cn('mt-0.5 text-sm font-medium', f.severity === 'red' ? 'text-red-600' : 'text-amber-600')}>{f.reason}</p>
                   <p className="text-ink-subtle mt-1 text-xs">
@@ -531,6 +463,56 @@ export function WorkforceReportPage() {
           </ul>
         )}
       </Card>
+    </>
+  )
+}
+
+/* ---------------------------------- page ---------------------------------- */
+
+export function WorkforceReportPage() {
+  const [params, setParams] = useSearchParams()
+  const periodId = pick(params.get('period'), periodOptions.map((o) => o.value), '30') as PeriodId
+  const { data, isPending, isError, error, refetch } = useWorkforceReport(periodId)
+
+  const onPeriod = (id: PeriodId) => {
+    const next = new URLSearchParams(params)
+    if (id === '30') next.delete('period')
+    else next.set('period', id)
+    setParams(next, { replace: true })
+  }
+
+  return (
+    <div className="space-y-6">
+      <nav aria-label="Breadcrumb" className="text-ink-subtle flex items-center gap-1.5 text-xs print:hidden">
+        <Link to="/reports" className="hover:text-ink">
+          Reports
+        </Link>
+        <ChevronRight className="size-3" aria-hidden="true" />
+        <span aria-current="page" className="text-brand-700 font-medium">
+          Workforce Report
+        </span>
+      </nav>
+
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading workforce report…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load the workforce report.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Report view={data} periodId={periodId} onPeriod={onPeriod} />
+      )}
     </div>
   )
 }

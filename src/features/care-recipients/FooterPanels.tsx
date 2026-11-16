@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom'
-import { recentlyViewed, recipients, triggers } from './data'
+import { recentlyViewed, recipients } from './data'
+import type { Trigger } from './data'
 import { Avatar } from '@/components/ui/Avatar'
 import { tonePill } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
-export function FooterPanels() {
+export function FooterPanels({ triggers }: { triggers: Trigger[] }) {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <section aria-labelledby="recently-viewed" className="card p-4">

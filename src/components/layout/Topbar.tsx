@@ -1,5 +1,6 @@
 import { Bell, Menu, Plus, Search } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
+import { useAuth } from '@/lib/auth-context'
 
 interface TopbarProps {
   navOpen: boolean
@@ -7,6 +8,7 @@ interface TopbarProps {
 }
 
 export function Topbar({ navOpen, onMenuClick }: TopbarProps) {
+  const { admin } = useAuth()
   return (
     <header className="border-line bg-surface/85 sticky top-0 z-20 border-b backdrop-blur-md print:hidden">
       <div className="flex h-16 items-center gap-2 px-4 sm:gap-3 sm:px-6">
@@ -68,7 +70,7 @@ export function Topbar({ navOpen, onMenuClick }: TopbarProps) {
           />
 
           <Avatar
-            name="Sarah Jenkins"
+            name={admin?.fullName ?? 'Admin'}
             className="ring-line hidden size-9.5 ring-1 sm:grid"
           />
         </div>

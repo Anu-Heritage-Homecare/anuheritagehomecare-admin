@@ -93,7 +93,7 @@ function CreditForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
             id="cr-amount-hint"
             className={cn('mt-1 text-xs', touched && !amountOk ? 'text-red-700' : 'text-ink-subtle')}
           >
-            {invoice ? `Up to ${formatMoney(max)} on ${invoice.number}.` : 'Choose an invoice first.'}
+            {invoice ? `Up to ${formatMoney(max, 'NGN')} on ${invoice.number}.` : 'Choose an invoice first.'}
           </p>
         </div>
 
@@ -121,7 +121,7 @@ function CreditForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
           <SelectBox id="cr-invoice" value={number} onChange={(e) => setNumber(e.target.value)} className={fieldClass}>
             {invoices.map((i) => (
               <option key={i.number} value={i.number}>
-                {i.number} (Outstanding: {formatMoney(creditable(i))})
+                {i.number} (Outstanding: {formatMoney(creditable(i), 'NGN')})
               </option>
             ))}
           </SelectBox>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { MoreHorizontal, Search } from 'lucide-react'
-import { visits } from './data'
+import type { Visit } from './data'
 import type { VisitStatus } from '@/types'
 import {
   PriorityLabel,
@@ -25,7 +25,7 @@ const matchesFilter: Record<Filter, (s: VisitStatus) => boolean> = {
   completed: (s) => s === 'completed',
 }
 
-export function TodaysSchedule() {
+export function TodaysSchedule({ visits }: { visits: Visit[] }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
 
@@ -39,7 +39,7 @@ export function TodaysSchedule() {
         .toLowerCase()
         .includes(q)
     })
-  }, [filter, query])
+  }, [filter, query, visits])
 
   return (
     <section aria-labelledby="todays-schedule">

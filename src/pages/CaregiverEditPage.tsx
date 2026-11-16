@@ -4,9 +4,10 @@ import {
   Navigate,
   useBlocker,
   useLocation,
+  useNavigate,
   useParams,
 } from 'react-router-dom'
-import { Check, ChevronRight, CircleX, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, ChevronRight, CircleX, Loader2, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import {
   TODAY,
   changesFrom,
@@ -24,12 +25,13 @@ import {
   branches,
   employmentTypes,
   formatTime,
-  getStaffMember,
   shifts,
   statusLabels,
   titles,
   weekdays,
 } from '@/features/caregivers/roster-data'
+import { useCaregiverProfile } from '@/features/caregivers/useCaregivers'
+import { useCaregiverMutations } from '@/features/caregivers/useCaregiverMutations'
 import type {
   Credential,
   Employment,
@@ -46,9 +48,33 @@ import { SelectBox } from '@/components/ui/SelectBox'
 export function CaregiverEditPage() {
   const { caregiverId } = useParams()
   const { search } = useLocation()
-  const member = getStaffMember(caregiverId)
+  const { data: member, isPending, isError, error, refetch } = useCaregiverProfile(caregiverId)
 
-  if (!member) return <Navigate to="/caregivers" replace />
+  if (!caregiverId) return <Navigate to="/caregivers" replace />
+
+  if (isPending) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading caregiver…
+      </div>
+    )
+  }
+  if (isError) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load this caregiver.</p>
+        <p className="text-ink-subtle text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   /*
    * Keyed on the person. The form's state used to live in this component and
@@ -60,6 +86,8 @@ export function CaregiverEditPage() {
 }
 
 function EditForm({ member, search }: { member: StaffMember; search: string }) {
+  const navigate = useNavigate()
+  const { save, remove } = useCaregiverMutations(member.id)
   const [values, setValues] = useState<FormValues>(() => toFormValues(member))
   const [submitted, setSubmitted] = useState(false)
   // Not on the staff record yet, so it lives only on this form for now.
@@ -122,8 +150,14 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
     setAttempt((n) => n + 1)
     setSubmitted(true)
     // Nothing to save is not an error, but it must not report "0 changes".
-    if (!dirty || invalid) return
-    setSaved(changes)
+    if (!dirty || invalid || save.isPending) return
+    // Capture the diff for the summary, then persist every section that the
+    // form covers. The record is refetched on success so the profile is fresh.
+    const persisted = changes
+    save.mutate(
+      { id: member.id, before: member, values },
+      { onSuccess: () => setSaved(persisted) },
+    )
   }
 
   const offered = hoursOffered(values.availability)
@@ -165,7 +199,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
             Update {member.name}{/s$/i.test(member.name) ? '’' : '’s'} information, certifications, and preferences.
           </p>
         </div>
-        <Actions dirty={dirty} to={profile} where="at the top of the form" />
+        <Actions dirty={dirty} to={profile} where="at the top of the form" saving={save.isPending} />
       </header>
 
       {submitted && invalid && (
@@ -254,7 +288,17 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
         </div>
       )}
 
-      {saved && (
+      {save.isError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        >
+          <p className="font-semibold">The changes could not be saved.</p>
+          <p className="mt-1">{save.error.message}</p>
+        </div>
+      )}
+
+      {saved && !save.isError && (
         <SaveSummary
           ref={savedRef}
           changes={saved}
@@ -642,8 +686,16 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
       </section>
 
       <div className="border-line -mx-4 flex flex-wrap items-center justify-between gap-3 border-t px-4 pt-5 sm:-mx-6 sm:px-6">
-        <DeleteControl member={member} blockers={blockers} />
-        <Actions dirty={dirty} to={profile} where="at the end of the form" />
+        <DeleteControl
+          member={member}
+          blockers={blockers}
+          onDelete={() =>
+            remove.mutate(member.id, { onSuccess: () => void navigate(rosterPath) })
+          }
+          deleting={remove.isPending}
+          deleteError={remove.isError ? remove.error.message : null}
+        />
+        <Actions dirty={dirty} to={profile} where="at the end of the form" saving={save.isPending} />
       </div>
     </form>
   )
@@ -655,11 +707,14 @@ function Actions({
   dirty,
   to,
   where,
+  saving = false,
 }: {
   dirty: boolean
   to: string
   /** Distinguishes the header pair from the footer pair for a screen reader. */
   where: string
+  /** A save is in flight, so the button shows progress and blocks a re submit. */
+  saving?: boolean
 }) {
   const reasonId = `save-reason-${where.replace(/\s+/g, '-')}`
 
@@ -679,16 +734,17 @@ function Actions({
       */}
       <button
         type="submit"
-        aria-disabled={!dirty}
+        aria-disabled={!dirty || saving}
         aria-describedby={dirty ? undefined : reasonId}
         // Drawn as the Figma's primary button either way; a clean submit is
         // answered by the "nothing to save" message rather than a grey button.
         className={cn(
-          'bg-brand-600 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white',
-          dirty ? 'hover:bg-brand-700' : 'cursor-default',
+          'bg-brand-600 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white',
+          dirty && !saving ? 'hover:bg-brand-700' : 'cursor-default',
         )}
       >
-        Save Changes
+        {saving && <Loader2 className="size-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
+        {saving ? 'Saving…' : 'Save Changes'}
         <span className="sr-only"> {where}</span>
       </button>
       {!dirty && (
@@ -720,15 +776,10 @@ function SaveSummary({
     >
       <p className="flex items-center gap-2 font-semibold">
         <Check className="size-4 shrink-0" strokeWidth={2.6} aria-hidden="true" />
-        {changes.length} change{changes.length === 1 ? '' : 's'} ready for{' '}
+        {changes.length} change{changes.length === 1 ? '' : 's'} saved for{' '}
         {name}
       </p>
-      {/* No backend to write to, so the screen reports the diff rather than
-          claiming a save that did not happen. */}
-      <p className="mt-1 text-emerald-800">
-        Nothing has been written — this build has no server. Here is what would
-        change:
-      </p>
+      <p className="mt-1 text-emerald-800">Here is what was written:</p>
       <ul className="mt-2 space-y-1">
         {changes.map((change) => (
           <li key={change.field} className="break-words">
@@ -747,9 +798,15 @@ function SaveSummary({
 function DeleteControl({
   member,
   blockers,
+  onDelete,
+  deleting,
+  deleteError,
 }: {
   member: StaffMember
   blockers: string[]
+  onDelete: () => void
+  deleting: boolean
+  deleteError: string | null
 }) {
   const [confirming, setConfirming] = useState(false)
   const blocked = blockers.length > 0
@@ -758,12 +815,14 @@ function DeleteControl({
     <div className="min-w-0">
       <button
         type="button"
-        aria-disabled={blocked}
+        aria-disabled={blocked || deleting}
         aria-describedby={blocked ? 'delete-blockers' : undefined}
-        onClick={() => !blocked && setConfirming(true)}
+        onClick={() => !blocked && !deleting && setConfirming(true)}
         className={cn(
           'inline-flex h-10 items-center gap-2 text-sm font-medium',
-          blocked ? 'cursor-not-allowed text-red-600/50' : 'text-red-600 hover:text-red-700',
+          blocked || deleting
+            ? 'cursor-not-allowed text-red-600/50'
+            : 'text-red-600 hover:text-red-700',
         )}
       >
         <Trash2 className="size-4" strokeWidth={2} aria-hidden="true" />
@@ -779,16 +838,40 @@ function DeleteControl({
           ))}
         </ul>
       )}
-      {/* Says what would happen instead of looking live and doing nothing. */}
+      {/* Archiving takes the caregiver out of the roster; it is confirmed before
+          the write so a mis click does not remove the record. */}
       {confirming && (
-        <p
+        <div
           role="status"
           className="border-line text-ink-muted mt-2 max-w-sm rounded-lg border p-3 text-xs"
         >
-          Deleting {member.name} would remove the employment record, the
-          credentials and the availability. Nothing has been removed — this
-          build has no server.
-        </p>
+          <p>
+            Archiving {member.name} removes them from the roster. This cannot be
+            undone here.
+          </p>
+          {deleteError && <p className="mt-2 font-medium text-red-700">{deleteError}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={deleting}
+              className="border-line bg-surface text-ink hover:bg-sunken inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium disabled:opacity-60"
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {deleting && (
+                <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden="true" />
+              )}
+              {deleting ? 'Archiving…' : 'Archive caregiver'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

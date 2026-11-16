@@ -1,9 +1,9 @@
-import { metrics } from './data'
+import type { Metric } from './data'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { toneFill, toneText } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
-export function PerformanceSnapshot() {
+export function PerformanceSnapshot({ metrics }: { metrics: Metric[] }) {
   return (
     <section aria-labelledby="performance-snapshot">
       <SectionHeading id="performance-snapshot" title="Performance Snapshot" />

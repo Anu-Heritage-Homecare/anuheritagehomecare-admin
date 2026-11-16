@@ -80,7 +80,7 @@ function PaymentDetails({ payment: p, account }: { payment: AccountPayment; acco
             <p className="text-ink-subtle text-xs font-medium uppercase">Payment Ref</p>
             <span className={cn(pill, tonePill[st.tone])}>{st.label}</span>
           </div>
-          <p className="text-ink mt-2 text-3xl font-bold tracking-tight tabular-nums">{formatMoney(p.amount)}</p>
+          <p className="text-ink mt-2 text-3xl font-bold tracking-tight tabular-nums">{formatMoney(p.amount, 'NGN')}</p>
           <dl className="border-line mt-4 space-y-2.5 border-t pt-4 text-sm">
             {rows.map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4">
@@ -108,7 +108,7 @@ function PaymentDetails({ payment: p, account }: { payment: AccountPayment; acco
               <span className="min-w-0 flex-1">
                 <span className="text-ink block text-sm font-semibold">{invoice.ref}</span>
                 <span className="text-ink-muted block text-xs">
-                  {account.name} • {formatMoney(invoice.amount)}
+                  {account.name} • {formatMoney(invoice.amount, 'NGN')}
                 </span>
               </span>
               <span className={cn(pill, tonePill[statementStatusTones[invoice.status]])}>

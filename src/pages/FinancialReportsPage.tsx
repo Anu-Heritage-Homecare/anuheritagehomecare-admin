@@ -1,21 +1,13 @@
 import { useSearchParams } from 'react-router-dom'
-import { CreditCard, Download, Star, TriangleAlert } from 'lucide-react'
+import { CreditCard, Download, Loader2, Star, TriangleAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { formatCompact, formatDate, formatMoney, revenueMonths } from '@/features/billing/data'
+import type { ReactNode } from 'react'
+import { formatCompact, formatDate, formatMoney } from '@/features/billing/data'
 import { branches } from '@/features/billing/accounts'
-import {
-  BOOK_START,
-  agingFor,
-  billedIn,
-  change,
-  collectedIn,
-  outstandingFor,
-  previousWindow,
-  rangeLabels,
-  windowFor,
-  writtenOffIn,
-} from '@/features/billing/reports'
-import type { BranchFilter, RangeId } from '@/features/billing/reports'
+import { rangeLabels } from '@/features/billing/reports'
+import type { RangeId } from '@/features/billing/reports'
+import { useFinancialReport } from '@/features/reports/useFinancialReport'
+import type { FinancialReportView } from '@/features/reports/useFinancialReport'
 import { Panel } from '@/components/ui/Panel'
 import { Donut } from '@/components/ui/Donut'
 import { SelectFilter } from '@/components/ui/SelectFilter'
@@ -59,36 +51,14 @@ function csvField(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 
-export function FinancialReportsPage() {
-  const [params, setParams] = useSearchParams()
-  const range = pick(params.get('range'), rangeIds, '30')
-  const branch = pick(params.get('branch'), ['all', ...branches] as const, 'all') as BranchFilter
-  const comparison = pick(params.get('compare'), ['previous', 'none'] as const, 'previous')
+/* ------------------------------- the report ------------------------------- */
 
-  const setParam = (key: string, value: string, fallback: string) => {
-    const next = new URLSearchParams(params)
-    if (value === fallback) next.delete(key)
-    else next.set(key, value)
-    setParams(next)
-  }
-
-  const w = windowFor(range)
-  const prev = previousWindow(w)
-  // A previous window that starts before the records do would compare against
-  // an empty stretch and report a huge rise; say there is nothing to compare.
-  const comparable = comparison === 'previous' && prev.from >= BOOK_START
-
-  const billed = billedIn(w, branch)
-  const billedChange = comparable ? change(billed, billedIn(prev, branch)) : null
-  const collected = collectedIn(w, branch)
-  const outstanding = outstandingFor(branch)
-  const writtenOff = writtenOffIn(w, branch)
-  const aging = agingFor(branch)
+function Report({ view, filters }: { view: FinancialReportView; filters: ReactNode }) {
+  const { currency, kpis, months, methods, aging } = view
   const agingTotal = aging.reduce((s, b) => s + b.amount, 0)
-  const months = revenueMonths(6)
-  const maxMonth = Math.max(...months.map((m) => m.value))
+  const maxMonth = Math.max(1, ...months.map((m) => m.revenue))
 
-  const kpis: {
+  const kpiCards: {
     id: string
     label: string
     value: string
@@ -100,22 +70,20 @@ export function FinancialReportsPage() {
     {
       id: 'billed',
       label: 'Total Billed',
-      value: formatMoney(billed),
+      value: formatMoney(kpis.totalRevenue, currency),
       badge:
-        comparison === 'none'
-          ? rangeLabels[range]
-          : billedChange === null
-            ? 'No earlier period on record'
-            : `${billedChange >= 0 ? '+' : '−'}${Math.abs(billedChange)}% vs previous period`,
-      badgeTone: billedChange === null ? 'neutral' : billedChange >= 0 ? 'good' : 'bad',
+        kpis.revenueDelta === null
+          ? 'No earlier period on record'
+          : `${kpis.revenueDelta >= 0 ? '+' : '−'}${Math.abs(kpis.revenueDelta)}% vs previous period`,
+      badgeTone: kpis.revenueDelta === null ? 'neutral' : kpis.revenueDelta >= 0 ? 'good' : 'bad',
       icon: CreditCard,
       tone: 'green',
     },
     {
       id: 'collected',
       label: 'Collections',
-      value: formatMoney(collected.amount),
-      badge: `${collected.count} payments`,
+      value: formatMoney(kpis.collections, currency),
+      badge: kpis.collectionRate === null ? '—' : `${kpis.collectionRate}% collection rate`,
       badgeTone: 'neutral',
       icon: Star,
       tone: 'green',
@@ -123,8 +91,8 @@ export function FinancialReportsPage() {
     {
       id: 'outstanding',
       label: 'Outstanding Balance',
-      value: formatMoney(outstanding.amount),
-      badge: `${outstanding.count} open · as of today`,
+      value: formatMoney(kpis.outstanding, currency),
+      badge: `${kpis.pendingCount} open · as of today`,
       badgeTone: 'warn',
       icon: Download,
       tone: 'amber',
@@ -132,9 +100,9 @@ export function FinancialReportsPage() {
     {
       id: 'writeoffs',
       label: 'Write-offs',
-      value: formatMoney(writtenOff),
-      badge: billed > 0 ? `${Math.round((writtenOff / billed) * 1000) / 10}% of billed` : '—',
-      badgeTone: writtenOff > 0 ? 'bad' : 'neutral',
+      value: formatMoney(kpis.writeOffs, currency),
+      badge: kpis.lossRate === null ? '—' : `${kpis.lossRate}% of billed`,
+      badgeTone: kpis.writeOffs > 0 ? 'bad' : 'neutral',
       icon: TriangleAlert,
       tone: 'red',
     },
@@ -147,23 +115,26 @@ export function FinancialReportsPage() {
     neutral: 'text-ink-subtle',
   }
 
-  const methodSegments = Object.entries(collected.byMethod)
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, value]) => ({ id: label, label, value, colourClass: methodTone[label] ?? toneText.slate }))
+  const methodSegments = methods.map((m) => ({
+    id: m.method,
+    label: m.method,
+    value: m.amount,
+    colourClass: methodTone[m.method] ?? toneText.slate,
+  }))
 
   /** The figures on screen as a CSV — Excel opens it directly. */
   const exportCsv = () => {
     const rows: string[][] = [
-      ['Financial report', `${formatDate(w.from)} – ${formatDate(w.to)}`, branch === 'all' ? 'All branches' : branch],
+      ['Financial report', `${formatDate(view.from)} – ${formatDate(view.to)}`],
       [],
       ['Measure', 'Amount (NGN)'],
-      ['Total billed', String(billed)],
-      ['Collections', String(collected.amount)],
-      ['Outstanding (as of today)', String(outstanding.amount)],
-      ['Write-offs', String(writtenOff)],
+      ['Total billed', String(kpis.totalRevenue)],
+      ['Collections', String(kpis.collections)],
+      ['Outstanding (as of today)', String(kpis.outstanding)],
+      ['Write-offs', String(kpis.writeOffs)],
       [],
       ['Collections by method', 'Amount (NGN)'],
-      ...Object.entries(collected.byMethod).map(([m, v]) => [m, String(v)]),
+      ...methods.map((m) => [m.method, String(m.amount)]),
       [],
       ['Aging period', 'Invoices', 'Amount (NGN)', 'Share (%)'],
       ...aging.map((b) => [b.label, String(b.count), String(b.amount), String(b.share)]),
@@ -172,18 +143,18 @@ export function FinancialReportsPage() {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = `financial-report-${w.from}-to-${w.to}${branch === 'all' ? '' : `-${branch.split(' ')[0].toLowerCase()}`}.csv`
+    a.download = `financial-report-${view.from}-to-${view.to}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="space-y-6">
+    <>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-ink text-2xl font-bold tracking-tight">Financial Reports</h1>
           <p className="text-ink-muted mt-1 text-sm">
-            Billing and collections for {formatDate(w.from)} – {formatDate(w.to)}
+            Billing and collections for {formatDate(view.from)} – {formatDate(view.to)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 print:hidden">
@@ -197,16 +168,12 @@ export function FinancialReportsPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-2.5 print:hidden">
-        <SelectFilter label="Date Range" value={range} onChange={(v) => setParam('range', v, '30')} options={rangeOptions} className="w-full min-[480px]:w-auto" />
-        <SelectFilter label="Branch" value={branch} onChange={(v) => setParam('branch', v, 'all')} options={branchOptions} className="w-full min-[480px]:w-auto" />
-        <SelectFilter label="Comparison" value={comparison} onChange={(v) => setParam('compare', v, 'previous')} options={comparisonOptions} className="w-full min-[480px]:w-auto" />
-      </div>
+      {filters}
 
       <section aria-labelledby="report-kpis">
         <h2 id="report-kpis" className="sr-only">Key figures</h2>
         <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-4">
-          {kpis.map(({ id, label, value, badge, badgeTone, icon: Icon, tone }) => (
+          {kpiCards.map(({ id, label, value, badge, badgeTone, icon: Icon, tone }) => (
             <article key={id} className="card p-4">
               <div className="flex items-start justify-between gap-2">
                 <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', toneChip[tone])}>
@@ -224,36 +191,46 @@ export function FinancialReportsPage() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <Panel
           title="Revenue by Month"
-          description={`Plan revenue, ${months[0].label} – ${months[months.length - 1].label} · organisation-wide, not split by branch`}
+          description={
+            months.length > 0
+              ? `Plan revenue, ${months[0].label} – ${months[months.length - 1].label} · organisation-wide, not split by branch`
+              : 'Plan revenue · organisation-wide, not split by branch'
+          }
           titleClassName="text-base"
           className="xl:col-span-3"
         >
-          {/* HTML bars: labels stay legible at any width. */}
-          <div aria-hidden="true" className="flex h-56 items-end gap-3 pt-6 sm:gap-6">
-            {months.map((m) => (
-              <div key={m.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
-                <span className="text-ink mb-1.5 text-[0.6875rem] font-semibold tabular-nums whitespace-nowrap">
-                  {formatCompact(m.value)}
-                </span>
-                <div
-                  className="bg-brand-600 w-full max-w-11 rounded-t-md"
-                  style={{ height: `${(m.value / maxMonth) * 80}%` }}
-                />
-                <span className="text-ink-subtle mt-2 text-xs whitespace-nowrap">{m.label.split(' ')[0]}</span>
+          {months.length === 0 ? (
+            <p className="text-ink-muted py-10 text-center text-sm">No revenue in this period.</p>
+          ) : (
+            <>
+              {/* HTML bars: labels stay legible at any width. */}
+              <div aria-hidden="true" className="flex h-56 items-end gap-3 pt-6 sm:gap-6">
+                {months.map((m) => (
+                  <div key={m.id} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
+                    <span className="text-ink mb-1.5 text-[0.6875rem] font-semibold tabular-nums whitespace-nowrap">
+                      {formatCompact(m.revenue, currency)}
+                    </span>
+                    <div
+                      className="bg-brand-600 w-full max-w-11 rounded-t-md"
+                      style={{ height: `${(m.revenue / maxMonth) * 80}%` }}
+                    />
+                    <span className="text-ink-subtle mt-2 text-xs whitespace-nowrap">{m.short}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <table className="sr-only">
-            <caption>Plan revenue by month</caption>
-            <tbody>
-              {months.map((m) => (
-                <tr key={m.label}>
-                  <th scope="row">{m.label}</th>
-                  <td>{formatMoney(m.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              <table className="sr-only">
+                <caption>Plan revenue by month</caption>
+                <tbody>
+                  {months.map((m) => (
+                    <tr key={m.id}>
+                      <th scope="row">{m.label}</th>
+                      <td>{formatMoney(m.revenue, currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </Panel>
 
         <Panel
@@ -265,28 +242,21 @@ export function FinancialReportsPage() {
           {methodSegments.length === 0 ? (
             <p className="text-ink-muted py-8 text-center text-sm">No payments settled in this period.</p>
           ) : (
-            <>
-              <Donut
-                segments={methodSegments}
-                centreLabel="Collected"
-                centreValue={formatCompact(collected.amount)}
-                caption="Collections by method"
-                columns={['Method', 'Amount', 'Share']}
-                formatValue={formatMoney}
-              />
-              {collected.byMethod['Not recorded'] && (
-                <p className="text-ink-subtle mt-3 text-xs">
-                  "Not recorded" is payments settled before the transaction log begins.
-                </p>
-              )}
-            </>
+            <Donut
+              segments={methodSegments}
+              centreLabel="Collected"
+              centreValue={formatCompact(kpis.collections, currency)}
+              caption="Collections by method"
+              columns={['Method', 'Amount', 'Share']}
+              formatValue={(v) => formatMoney(v, currency)}
+            />
           )}
         </Panel>
       </div>
 
       <Panel
         title="Aging Report"
-        description={`Unpaid balances as of today by age since issue${branch === 'all' ? '' : ` · ${branch}`}`}
+        description="Unpaid balances as of today by age since issue"
         titleClassName="text-base"
         flush
       >
@@ -304,9 +274,7 @@ export function FinancialReportsPage() {
             <tbody className="divide-line divide-y">
               {aging.map((b) => (
                 <tr key={b.id}>
-                  <td className="text-ink py-3.5 pr-4 font-semibold whitespace-nowrap">
-                    {b.id === '0-30' ? 'Current (0–30 days)' : b.label}
-                  </td>
+                  <td className="text-ink py-3.5 pr-4 font-semibold whitespace-nowrap">{b.label}</td>
                   <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">
                     {b.count} {b.count === 1 ? 'item' : 'items'}
                   </td>
@@ -316,7 +284,7 @@ export function FinancialReportsPage() {
                     </div>
                   </td>
                   <td className="text-ink py-3.5 pr-4 text-right font-semibold whitespace-nowrap tabular-nums">
-                    {formatMoney(b.amount)}
+                    {formatMoney(b.amount, currency)}
                   </td>
                   <td className="text-ink py-3.5 text-right tabular-nums">{b.share}%</td>
                 </tr>
@@ -327,13 +295,66 @@ export function FinancialReportsPage() {
                 <td className="text-ink py-3 pr-4 font-semibold">Total</td>
                 <td className="text-ink-muted py-3 pr-4">{aging.reduce((s, b) => s + b.count, 0)} items</td>
                 <td />
-                <td className="text-ink py-3 pr-4 text-right font-bold tabular-nums">{formatMoney(agingTotal)}</td>
+                <td className="text-ink py-3 pr-4 text-right font-bold tabular-nums">{formatMoney(agingTotal, currency)}</td>
                 <td className="text-ink py-3 text-right tabular-nums">{agingTotal ? '100%' : '—'}</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </Panel>
+    </>
+  )
+}
+
+/* ---------------------------------- page ---------------------------------- */
+
+export function FinancialReportsPage() {
+  const [params, setParams] = useSearchParams()
+  const range = pick(params.get('range'), rangeIds, '30')
+  const branch = pick(params.get('branch'), ['all', ...branches] as const, 'all')
+  const comparison = pick(params.get('compare'), ['previous', 'none'] as const, 'previous')
+
+  const setParam = (key: string, value: string, fallback: string) => {
+    const next = new URLSearchParams(params)
+    if (value === fallback) next.delete(key)
+    else next.set(key, value)
+    setParams(next)
+  }
+
+  // 'ytd' maps to a year window; the backend scopes to one market, so the
+  // branch and comparison dropdowns stay for parity but do not refetch.
+  const { data, isPending, isError, error, refetch } = useFinancialReport(range === 'ytd' ? '365' : range)
+
+  const filters = (
+    <div className="flex flex-wrap gap-2.5 print:hidden">
+      <SelectFilter label="Date Range" value={range} onChange={(v) => setParam('range', v, '30')} options={rangeOptions} className="w-full min-[480px]:w-auto" />
+      <SelectFilter label="Branch" value={branch} onChange={(v) => setParam('branch', v, 'all')} options={branchOptions} className="w-full min-[480px]:w-auto" />
+      <SelectFilter label="Comparison" value={comparison} onChange={(v) => setParam('compare', v, 'previous')} options={comparisonOptions} className="w-full min-[480px]:w-auto" />
+    </div>
+  )
+
+  return (
+    <div className="space-y-6">
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading financial report…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load the financial report.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Report view={data} filters={filters} />
+      )}
     </div>
   )
 }

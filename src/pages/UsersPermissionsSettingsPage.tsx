@@ -1,23 +1,29 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Construction, Plus, Search, UserPlus } from 'lucide-react'
+import { Loader2, Plus, Search, UserPlus } from 'lucide-react'
 import {
   actions,
-  cancelInvitation,
-  createRole,
   departments,
   emailTaken,
-  invite,
   modules,
   roleNameTaken,
   togglePermission,
-  updateUser,
+  useBranchId,
+  useInvitationsQuery,
+  useInvite,
+  useRemoveUser,
+  useResendInvitation,
+  useRevokeInvitation,
+  useRolesQuery,
+  useSetRolePermissions,
+  useCreateRole,
+  useUpdateUser,
+  useUsersQuery,
   userBranches,
-  useUsers,
   validEmail,
   validPhone,
 } from '@/features/settings/users'
-import type { Permissions, Role, RoleDef, UserAccount, UserBranch } from '@/features/settings/users'
+import type { Invitation, Permissions, Role, RoleDef, UserAccount, UserBranch } from '@/features/settings/users'
 import { Avatar } from '@/components/ui/Avatar'
 import { Drawer } from '@/components/ui/Drawer'
 import { DropdownMenu } from '@/components/ui/DropdownMenu'
@@ -63,20 +69,33 @@ function StatusPill({ active }: { active: boolean }) {
   )
 }
 
+/** The role name to its backend id, for writes that key on the id. */
+function roleIdByName(roles: RoleDef[], name: string): string | undefined {
+  return roles.find((r) => r.name === name)?.id
+}
+
 export function UsersPermissionsSettingsPage() {
-  const { users, invitations, roles: roleDefs } = useUsers()
+  const usersQuery = useUsersQuery()
+  const rolesQuery = useRolesQuery()
+  const invitationsQuery = useInvitationsQuery()
+  const branchId = useBranchId()
+
+  const updateUser = useUpdateUser()
+  const removeUser = useRemoveUser()
+  const resendInvitation = useResendInvitation()
+  const revokeInvitation = useRevokeInvitation()
+
+  const users = usersQuery.data ?? []
+  const roleDefs = rolesQuery.data ?? []
+  const invitations = invitationsQuery.data ?? []
   const roles = roleDefs.map((r) => r.name)
+
   const [params, setParams] = useSearchParams()
   const tab: TabId = tabs.find((t) => t.id === params.get('tab'))?.id ?? 'users'
 
   const [query, setQuery] = useState('')
   const [role, setRole] = useState(ALL)
   const [branch, setBranch] = useState(ALL)
-  /*
-   * The design's chip reads "Status: Active" above a table that includes an
-   * inactive account. Both cannot be true, so this starts on All and shows the
-   * eight rows as drawn.
-   */
   const [status, setStatus] = useState(ALL)
   const [inviting, setInviting] = useState(false)
   const [creatingRole, setCreatingRole] = useState(false)
@@ -92,6 +111,18 @@ export function UsersPermissionsSettingsPage() {
       (status === ALL || u.active === (status === 'active')),
   )
 
+  const isPending = usersQuery.isPending || rolesQuery.isPending || invitationsQuery.isPending
+  const isError = usersQuery.isError || rolesQuery.isError || invitationsQuery.isError
+  const error = usersQuery.error ?? rolesQuery.error ?? invitationsQuery.error
+  const retry = () => {
+    void usersQuery.refetch()
+    void rolesQuery.refetch()
+    void invitationsQuery.refetch()
+  }
+
+  /** Set a user's active flag, resolving nothing but the status. */
+  const setActive = (id: string, active: boolean) => updateUser.mutate({ id, active })
+
   return (
     <div className="space-y-5">
       <header>
@@ -101,246 +132,435 @@ export function UsersPermissionsSettingsPage() {
         </p>
       </header>
 
-      <nav aria-label="Users and permissions sections" className="border-line no-scrollbar flex gap-6 overflow-x-auto border-b">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            aria-current={t.id === tab ? 'page' : undefined}
-            onClick={() => setParams(t.id === 'users' ? {} : { tab: t.id }, { replace: true })}
-            className={cn(
-              '-mb-px border-b-2 pb-2.5 text-sm whitespace-nowrap transition-colors',
-              t.id === tab
-                ? 'border-brand-600 text-brand-700 font-semibold'
-                : 'text-ink-muted hover:text-ink border-transparent',
-            )}
-          >
-            {t.label}
-            {t.id === 'invitations' && invitations.length > 0 && (
-              <span className="bg-brand-50 text-brand-700 ml-1.5 rounded-full px-1.5 py-0.5 text-[0.6875rem] font-semibold">
-                {invitations.length}
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
-
-      {tab === 'users' && (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative w-full sm:w-60">
-              <Search
-                className="text-ink-subtle pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search users"
-                placeholder="Search users..."
-                className="border-control bg-surface text-ink placeholder:text-ink-subtle focus:border-brand-400 h-11 w-full rounded-lg border pr-3 pl-9 text-sm sm:h-9.5"
-              />
-            </div>
-            <SelectFilter chip label="Role" value={role} onChange={setRole} options={withAll(roles)} className="bg-surface rounded-lg" />
-            <SelectFilter chip label="Branch" value={branch} onChange={setBranch} options={withAll(userBranches)} className="bg-surface rounded-lg" />
-            <SelectFilter chip label="Status" value={status} onChange={setStatus} options={statusOptions} className="bg-surface rounded-lg" />
-            <button
-              type="button"
-              onClick={() => setInviting(true)}
-              className="bg-brand-600 hover:bg-brand-700 inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors sm:ml-auto sm:h-9.5"
-            >
-              <UserPlus className="size-4" strokeWidth={2.2} aria-hidden="true" />
-              Invite User
-            </button>
-          </div>
-
-          <section aria-label="Users" className="card p-3">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[52rem] text-left text-sm">
-                <thead>
-                  <tr className="bg-sunken text-ink">
-                    <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Full Name</th>
-                    <th scope="col" className={th}>Email</th>
-                    <th scope="col" className={th}>Role</th>
-                    <th scope="col" className={th}>Branch</th>
-                    <th scope="col" className={th}>Status</th>
-                    <th scope="col" className={th}>Last Active</th>
-                    <th scope="col" className={cn(th, 'rounded-r-lg pr-4 text-center')}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-line divide-y">
-                  {rows.map((u) => (
-                    <tr key={u.id}>
-                      <th scope="row" className={cn(td, 'pl-4 font-semibold')}>
-                        <span className="flex items-center gap-2.5">
-                          <Avatar name={u.name} decorative className="size-8" />
-                          <span className="text-ink">{u.name}</span>
-                        </span>
-                      </th>
-                      <td className={cn(td, 'text-ink-muted')}>{u.email}</td>
-                      <td className={cn(td, 'text-ink')}>{u.role}</td>
-                      <td className={cn(td, 'text-ink-muted')}>{u.branch}</td>
-                      <td className={td}><StatusPill active={u.active} /></td>
-                      <td className={cn(td, 'text-ink-muted')}>{u.lastActive}</td>
-                      <td className={cn(td, 'pr-4 text-center')}>
-                        <span className="inline-flex">
-                          <DropdownMenu
-                            label={`Actions for ${u.name}`}
-                            items={[
-                              { id: 'edit', label: 'Edit role & branch', onSelect: () => setEditingId(u.id) },
-                              u.active
-                                ? { id: 'deactivate', label: 'Deactivate', destructive: true, onSelect: () => updateUser(u.id, { active: false }) }
-                                : { id: 'reactivate', label: 'Reactivate', onSelect: () => updateUser(u.id, { active: true }) },
-                            ]}
-                          />
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {rows.length === 0 && (
-              <p className="text-ink-muted px-4 py-10 text-center text-sm">No users match these filters.</p>
-            )}
-          </section>
-        </>
-      )}
-
-      {tab === 'invitations' && (
-        <section aria-label="Pending invitations" className="card p-3">
-          {invitations.length === 0 ? (
-            <div className="px-4 py-12 text-center">
-              <p className="text-ink text-sm font-semibold">No pending invitations</p>
-              <p className="text-ink-muted mt-1 text-sm">People you invite appear here until they accept.</p>
-              <button
-                type="button"
-                onClick={() => setInviting(true)}
-                className="border-control text-ink hover:bg-sunken mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium"
-              >
-                <UserPlus className="size-4" strokeWidth={2} aria-hidden="true" />
-                Invite User
-              </button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-left text-sm">
-                <thead>
-                  <tr className="bg-sunken text-ink">
-                    <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Full Name</th>
-                    <th scope="col" className={th}>Email</th>
-                    <th scope="col" className={th}>Role</th>
-                    <th scope="col" className={th}>Branch</th>
-                    <th scope="col" className={th}>Status</th>
-                    <th scope="col" className={cn(th, 'rounded-r-lg pr-4')}><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-line divide-y">
-                  {invitations.map((i) => (
-                    <tr key={i.id}>
-                      <th scope="row" className={cn(td, 'text-ink pl-4 font-semibold')}>{i.name}</th>
-                      <td className={cn(td, 'text-ink-muted')}>{i.email}</td>
-                      <td className={cn(td, 'text-ink')}>{i.role}</td>
-                      <td className={cn(td, 'text-ink-muted')}>{i.branch}</td>
-                      <td className={td}>
-                        <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
-                      </td>
-                      <td className={cn(td, 'pr-4 text-right')}>
-                        <button
-                          type="button"
-                          onClick={() => cancelInvitation(i.id)}
-                          aria-label={`Cancel invitation for ${i.name}`}
-                          className="text-sm font-medium text-red-700 hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
-
-      {tab === 'roles' && (
-        <>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setCreatingRole(true)}
-              className="bg-brand-600 hover:bg-brand-700 inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors sm:h-9.5"
-            >
-              <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
-              Create Role
-            </button>
-          </div>
-          <section aria-label="Roles" className="card p-3">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-left text-sm">
-                <thead>
-                  <tr className="bg-sunken text-ink">
-                    <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Role</th>
-                    <th scope="col" className={th}>Description</th>
-                    <th scope="col" className={th}>Users</th>
-                    <th scope="col" className={cn(th, 'rounded-r-lg pr-4')}>Type</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-line divide-y">
-                  {roleDefs.map((r) => (
-                    <tr key={r.name}>
-                      <th scope="row" className={cn(td, 'text-ink pl-4 font-semibold')}>{r.name}</th>
-                      <td className="text-ink-muted px-3 py-3">{r.description || '—'}</td>
-                      <td className={cn(td, 'text-ink')}>{users.filter((u) => u.role === r.name).length}</td>
-                      <td className={cn(td, 'text-ink-muted pr-4')}>{r.builtIn ? 'Built-in' : 'Custom'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
-      )}
-
-      {tab === 'permissions' && (
-        <div className="card grid place-items-center px-6 py-20 text-center">
-          <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">
-            <Construction className="size-5" strokeWidth={1.8} aria-hidden="true" />
-          </span>
-          <p className="text-ink mt-3 text-sm font-semibold">Not built yet</p>
-          <p className="text-ink-muted mt-1 max-w-sm text-sm">This tab is waiting on its design.</p>
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading users…
         </div>
-      )}
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load users and permissions.</p>
+          <p className="text-ink-subtle text-sm">{error?.message}</p>
+          <button
+            type="button"
+            onClick={retry}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <>
+          <nav aria-label="Users and permissions sections" className="border-line no-scrollbar flex gap-6 overflow-x-auto border-b">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                aria-current={t.id === tab ? 'page' : undefined}
+                onClick={() => setParams(t.id === 'users' ? {} : { tab: t.id }, { replace: true })}
+                className={cn(
+                  '-mb-px border-b-2 pb-2.5 text-sm whitespace-nowrap transition-colors',
+                  t.id === tab
+                    ? 'border-brand-600 text-brand-700 font-semibold'
+                    : 'text-ink-muted hover:text-ink border-transparent',
+                )}
+              >
+                {t.label}
+                {t.id === 'invitations' && invitations.length > 0 && (
+                  <span className="bg-brand-50 text-brand-700 ml-1.5 rounded-full px-1.5 py-0.5 text-[0.6875rem] font-semibold">
+                    {invitations.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
 
-      <Drawer open={inviting} onClose={() => setInviting(false)} title="Invite User">
-        <InviteForm
-          roles={roles}
-          onDone={(sent) => {
-            setInviting(false)
-            if (sent) setParams({ tab: 'invitations' }, { replace: true })
-          }}
-        />
-      </Drawer>
-      <Drawer open={creatingRole} onClose={() => setCreatingRole(false)} title="Create Role">
-        <RoleForm roles={roleDefs} onDone={() => setCreatingRole(false)} />
-      </Drawer>
-      <Drawer
-        open={Boolean(editing)}
-        onClose={() => setEditingId(null)}
-        title="Edit user"
-        subtitle={editing?.name}
-        placement="center"
-      >
-        {editing && <EditForm key={editing.id} user={editing} roles={roles} onDone={() => setEditingId(null)} />}
-      </Drawer>
+          {tab === 'users' && (
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative w-full sm:w-60">
+                  <Search
+                    className="text-ink-subtle pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    aria-label="Search users"
+                    placeholder="Search users..."
+                    className="border-control bg-surface text-ink placeholder:text-ink-subtle focus:border-brand-400 h-11 w-full rounded-lg border pr-3 pl-9 text-sm sm:h-9.5"
+                  />
+                </div>
+                <SelectFilter chip label="Role" value={role} onChange={setRole} options={withAll(roles)} className="bg-surface rounded-lg" />
+                <SelectFilter chip label="Branch" value={branch} onChange={setBranch} options={withAll(userBranches)} className="bg-surface rounded-lg" />
+                <SelectFilter chip label="Status" value={status} onChange={setStatus} options={statusOptions} className="bg-surface rounded-lg" />
+                <button
+                  type="button"
+                  onClick={() => setInviting(true)}
+                  className="bg-brand-600 hover:bg-brand-700 inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors sm:ml-auto sm:h-9.5"
+                >
+                  <UserPlus className="size-4" strokeWidth={2.2} aria-hidden="true" />
+                  Invite User
+                </button>
+              </div>
+
+              <section aria-label="Users" className="card p-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[52rem] text-left text-sm">
+                    <thead>
+                      <tr className="bg-sunken text-ink">
+                        <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Full Name</th>
+                        <th scope="col" className={th}>Email</th>
+                        <th scope="col" className={th}>Role</th>
+                        <th scope="col" className={th}>Branch</th>
+                        <th scope="col" className={th}>Status</th>
+                        <th scope="col" className={th}>Last Active</th>
+                        <th scope="col" className={cn(th, 'rounded-r-lg pr-4 text-center')}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-line divide-y">
+                      {rows.map((u) => (
+                        <tr key={u.id}>
+                          <th scope="row" className={cn(td, 'pl-4 font-semibold')}>
+                            <span className="flex items-center gap-2.5">
+                              <Avatar name={u.name} decorative className="size-8" />
+                              <span className="text-ink">{u.name}</span>
+                            </span>
+                          </th>
+                          <td className={cn(td, 'text-ink-muted')}>{u.email}</td>
+                          <td className={cn(td, 'text-ink')}>{u.role || '—'}</td>
+                          <td className={cn(td, 'text-ink-muted')}>{u.branch}</td>
+                          <td className={td}><StatusPill active={u.active} /></td>
+                          <td className={cn(td, 'text-ink-muted')}>{u.lastActive || '—'}</td>
+                          <td className={cn(td, 'pr-4 text-center')}>
+                            <span className="inline-flex">
+                              <DropdownMenu
+                                label={`Actions for ${u.name}`}
+                                items={[
+                                  { id: 'edit', label: 'Edit role & branch', onSelect: () => setEditingId(u.id) },
+                                  u.active
+                                    ? { id: 'deactivate', label: 'Deactivate', destructive: true, onSelect: () => setActive(u.id, false) }
+                                    : { id: 'reactivate', label: 'Reactivate', onSelect: () => setActive(u.id, true) },
+                                  { id: 'remove', label: 'Remove account', destructive: true, onSelect: () => removeUser.mutate(u.id) },
+                                ]}
+                              />
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {rows.length === 0 && (
+                  <p className="text-ink-muted px-4 py-10 text-center text-sm">No users match these filters.</p>
+                )}
+              </section>
+            </>
+          )}
+
+          {tab === 'invitations' && (
+            <section aria-label="Pending invitations" className="card p-3">
+              {invitations.length === 0 ? (
+                <div className="px-4 py-12 text-center">
+                  <p className="text-ink text-sm font-semibold">No pending invitations</p>
+                  <p className="text-ink-muted mt-1 text-sm">People you invite appear here until they accept.</p>
+                  <button
+                    type="button"
+                    onClick={() => setInviting(true)}
+                    className="border-control text-ink hover:bg-sunken mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium"
+                  >
+                    <UserPlus className="size-4" strokeWidth={2} aria-hidden="true" />
+                    Invite User
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[40rem] text-left text-sm">
+                    <thead>
+                      <tr className="bg-sunken text-ink">
+                        <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Full Name</th>
+                        <th scope="col" className={th}>Email</th>
+                        <th scope="col" className={th}>Role</th>
+                        <th scope="col" className={th}>Branch</th>
+                        <th scope="col" className={th}>Status</th>
+                        <th scope="col" className={cn(th, 'rounded-r-lg pr-4 text-right')}><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-line divide-y">
+                      {invitations.map((i) => (
+                        <tr key={i.id}>
+                          <th scope="row" className={cn(td, 'text-ink pl-4 font-semibold')}>{i.name}</th>
+                          <td className={cn(td, 'text-ink-muted')}>{i.email}</td>
+                          <td className={cn(td, 'text-ink')}>{i.role || '—'}</td>
+                          <td className={cn(td, 'text-ink-muted')}>{i.branch}</td>
+                          <td className={td}>
+                            <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
+                          </td>
+                          <td className={cn(td, 'pr-4 text-right')}>
+                            <span className="inline-flex gap-3">
+                              <button
+                                type="button"
+                                onClick={() => resendInvitation.mutate(i.id)}
+                                disabled={resendInvitation.isPending}
+                                aria-label={`Resend invitation for ${i.name}`}
+                                className="text-brand-700 text-sm font-medium hover:underline disabled:opacity-50"
+                              >
+                                Resend
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => revokeInvitation.mutate(i.id)}
+                                disabled={revokeInvitation.isPending}
+                                aria-label={`Cancel invitation for ${i.name}`}
+                                className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {tab === 'roles' && (
+            <>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setCreatingRole(true)}
+                  className="bg-brand-600 hover:bg-brand-700 inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors sm:h-9.5"
+                >
+                  <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
+                  Create Role
+                </button>
+              </div>
+              <section aria-label="Roles" className="card p-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[40rem] text-left text-sm">
+                    <thead>
+                      <tr className="bg-sunken text-ink">
+                        <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Role</th>
+                        <th scope="col" className={th}>Description</th>
+                        <th scope="col" className={th}>Users</th>
+                        <th scope="col" className={cn(th, 'rounded-r-lg pr-4')}>Type</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-line divide-y">
+                      {roleDefs.map((r) => (
+                        <tr key={r.id || r.name}>
+                          <th scope="row" className={cn(td, 'text-ink pl-4 font-semibold')}>{r.name}</th>
+                          <td className="text-ink-muted px-3 py-3">{r.description || '—'}</td>
+                          <td className={cn(td, 'text-ink')}>{r.userCount}</td>
+                          <td className={cn(td, 'text-ink-muted pr-4')}>{r.builtIn ? 'Built-in' : 'Custom'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+
+          {tab === 'permissions' && <PermissionsTab roles={roleDefs} />}
+
+          <Drawer open={inviting} onClose={() => setInviting(false)} title="Invite User">
+            <InviteForm
+              roleDefs={roleDefs}
+              users={users}
+              invitations={invitations}
+              branchId={branchId}
+              onDone={(sent) => {
+                setInviting(false)
+                if (sent) setParams({ tab: 'invitations' }, { replace: true })
+              }}
+            />
+          </Drawer>
+          <Drawer open={creatingRole} onClose={() => setCreatingRole(false)} title="Create Role">
+            <RoleForm roles={roleDefs} onDone={() => setCreatingRole(false)} />
+          </Drawer>
+          <Drawer
+            open={Boolean(editing)}
+            onClose={() => setEditingId(null)}
+            title="Edit user"
+            subtitle={editing?.name}
+            placement="center"
+          >
+            {editing && (
+              <EditForm
+                key={editing.id}
+                user={editing}
+                roles={roles}
+                roleDefs={roleDefs}
+                branchId={branchId}
+                onDone={() => setEditingId(null)}
+              />
+            )}
+          </Drawer>
+        </>
+      )}
     </div>
   )
 }
 
+/* -------------------------------- permissions tab ------------------------- */
+
+/**
+ * The role grid, saved per role through the Permissions endpoint. Each role's
+ * grid is editable; Save replaces that role's granted keys.
+ */
+function PermissionsTab({ roles }: { roles: RoleDef[] }) {
+  const setPermissions = useSetRolePermissions()
+  const [openId, setOpenId] = useState<string | null>(null)
+  const open = roles.find((r) => r.id === openId)
+
+  return (
+    <>
+      <section aria-label="Role permissions" className="card p-3">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-left text-sm">
+            <thead>
+              <tr className="bg-sunken text-ink">
+                <th scope="col" className={cn(th, 'rounded-l-lg pl-4')}>Role</th>
+                <th scope="col" className={th}>Granted modules</th>
+                <th scope="col" className={cn(th, 'rounded-r-lg pr-4 text-right')}><span className="sr-only">Edit</span></th>
+              </tr>
+            </thead>
+            <tbody className="divide-line divide-y">
+              {roles.map((r) => {
+                const granted = modules.filter((m) => r.permissions[m].length > 0)
+                return (
+                  <tr key={r.id || r.name}>
+                    <th scope="row" className={cn(td, 'text-ink pl-4 font-semibold')}>{r.name}</th>
+                    <td className={cn(td, 'text-ink-muted')}>{granted.length === 0 ? '—' : granted.join(', ')}</td>
+                    <td className={cn(td, 'pr-4 text-right')}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(r.id)}
+                        disabled={!r.id}
+                        className="text-brand-700 text-sm font-medium hover:underline disabled:opacity-50"
+                      >
+                        Edit permissions
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <Drawer open={Boolean(open)} onClose={() => setOpenId(null)} title="Edit permissions" subtitle={open?.name}>
+        {open && (
+          <PermissionsForm
+            key={open.id}
+            role={open}
+            mutation={setPermissions}
+            onDone={() => setOpenId(null)}
+          />
+        )}
+      </Drawer>
+    </>
+  )
+}
+
+function PermissionsForm({
+  role,
+  mutation,
+  onDone,
+}: {
+  role: RoleDef
+  mutation: ReturnType<typeof useSetRolePermissions>
+  onDone: () => void
+}) {
+  const [permissions, setPermissions] = useState<Permissions>(role.permissions)
+
+  return (
+    <form
+      className="flex min-h-full flex-col"
+      onSubmit={(e) => {
+        e.preventDefault()
+        mutation.mutate({ id: role.id, permissions }, { onSuccess: onDone })
+      }}
+    >
+      <div className="flex-1 space-y-4 p-5">
+        <PermissionGrid permissions={permissions} onChange={setPermissions} />
+        {mutation.isError && <p className="text-xs text-red-700">{mutation.error.message}</p>}
+      </div>
+      <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
+        <button
+          type="button"
+          onClick={onDone}
+          className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={mutation.isPending}
+          className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+        >
+          {mutation.isPending ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 /* ---------------------------------- forms ---------------------------------- */
+
+function PermissionGrid({
+  permissions,
+  onChange,
+}: {
+  permissions: Permissions
+  onChange: (next: Permissions) => void
+}) {
+  return (
+    <div>
+      <h3 className="text-ink text-xs font-bold tracking-wide uppercase">Module Permissions</h3>
+      <div className="border-line mt-2.5 overflow-hidden rounded-lg border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-canvas border-line border-b">
+            <tr className="text-ink-muted text-xs">
+              <th scope="col" className="px-3 py-2 font-medium">Module</th>
+              {actions.map((a) => (
+                <th key={a.id} scope="col" className="w-11 py-2 text-center font-medium">
+                  <abbr title={a.label} className="no-underline">{a.short}</abbr>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-line divide-y">
+            {modules.map((m) => (
+              <tr key={m}>
+                <th scope="row" className="text-ink px-3 py-2 font-normal">{m}</th>
+                {actions.map((a) => (
+                  <td key={a.id} className="py-2 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${a.label} ${m}`}
+                      checked={permissions[m].includes(a.id)}
+                      onChange={(e) => onChange(togglePermission(permissions, m, a.id, e.target.checked))}
+                      className="accent-brand-600 size-4 align-middle"
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
 function Choice<T extends string>({
   label,
@@ -386,40 +606,70 @@ function Actions({ onCancel, disabled, label }: { onCancel: () => void; disabled
   )
 }
 
-function InviteForm({ roles, onDone }: { roles: Role[]; onDone: (sent: boolean) => void }) {
+function InviteForm({
+  roleDefs,
+  users,
+  invitations,
+  branchId,
+  onDone,
+}: {
+  roleDefs: RoleDef[]
+  users: UserAccount[]
+  invitations: Invitation[]
+  branchId: (name: string) => string | undefined
+  onDone: (sent: boolean) => void
+}) {
+  const roles = roleDefs.map((r) => r.name)
+  const invite = useInvite()
   const [first, setFirst] = useState('')
   const [last, setLast] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<Role>('Coordinator')
+  const [role, setRole] = useState<Role>(roles[0] ?? '')
   const [branch, setBranch] = useState<UserBranch>('Lagos HQ')
   const [department, setDepartment] = useState('')
   const [sendWelcome, setSendWelcome] = useState(true)
   const emailError =
-    email === '' ? null : !validEmail(email) ? 'Enter a valid email address.' : emailTaken(email) ? 'This email already has an account or invitation.' : null
+    email === ''
+      ? null
+      : !validEmail(email)
+        ? 'Enter a valid email address.'
+        : emailTaken(users, invitations, email)
+          ? 'This email already has an account or invitation.'
+          : null
   const phoneError = phone !== '' && !validPhone(phone) ? 'Enter the 10 digits after +234.' : null
+  const resolvedRoleId = roleDefs.find((r) => r.name === role)?.id
   const valid =
-    first.trim() !== '' && last.trim() !== '' && email !== '' && !emailError && phone !== '' && !phoneError
+    first.trim() !== '' &&
+    last.trim() !== '' &&
+    email !== '' &&
+    !emailError &&
+    phone !== '' &&
+    !phoneError &&
+    Boolean(resolvedRoleId)
   const label = 'text-ink text-sm font-semibold'
 
   return (
-    // Fills the drawer so the buttons sit at its foot, as drawn, and stay
-    // there while a short screen scrolls the fields.
     <form
       className="flex min-h-full flex-col"
       onSubmit={(e) => {
         e.preventDefault()
-        if (!valid) return
-        invite({
-          name: `${first.trim()} ${last.trim()}`,
-          email: email.trim(),
-          phone: phone.replace(/\s/g, ''),
-          role,
-          branch,
-          department,
-          sendWelcome,
-        })
-        onDone(true)
+        if (!valid || !resolvedRoleId) return
+        invite.mutate(
+          {
+            firstName: first.trim(),
+            lastName: last.trim(),
+            email: email.trim(),
+            phoneNumber: phone.replace(/\s/g, ''),
+            roleId: resolvedRoleId,
+            // A branch the loaded users never reference cannot be resolved to an
+            // id; the invitation is sent without one in that case.
+            branchId: branchId(branch),
+            department,
+            sendWelcome,
+          },
+          { onSuccess: () => onDone(true) },
+        )
       }}
     >
       <div className="flex-1 space-y-4 p-5">
@@ -494,6 +744,7 @@ function InviteForm({ roles, onDone }: { roles: Role[]; onDone: (sent: boolean) 
           />
           Send welcome email with credentials
         </label>
+        {invite.isError && <p className="text-xs text-red-700">{invite.error.message}</p>}
       </div>
       <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
         <button
@@ -505,18 +756,31 @@ function InviteForm({ roles, onDone }: { roles: Role[]; onDone: (sent: boolean) 
         </button>
         <button
           type="submit"
-          disabled={!valid}
+          disabled={!valid || invite.isPending}
           className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
         >
-          Send Invitation
+          {invite.isPending ? 'Sending…' : 'Send Invitation'}
         </button>
       </div>
     </form>
   )
 }
 
-function EditForm({ user, roles, onDone }: { user: UserAccount; roles: Role[]; onDone: () => void }) {
-  const [role, setRole] = useState(user.role)
+function EditForm({
+  user,
+  roles,
+  roleDefs,
+  branchId,
+  onDone,
+}: {
+  user: UserAccount
+  roles: Role[]
+  roleDefs: RoleDef[]
+  branchId: (name: string) => string | undefined
+  onDone: () => void
+}) {
+  const updateUser = useUpdateUser()
+  const [role, setRole] = useState(user.role || roles[0] || '')
   const [branch, setBranch] = useState(user.branch)
   const [active, setActive] = useState(user.active)
 
@@ -525,8 +789,17 @@ function EditForm({ user, roles, onDone }: { user: UserAccount; roles: Role[]; o
       className="space-y-4 p-4"
       onSubmit={(e) => {
         e.preventDefault()
-        updateUser(user.id, { role, branch, active })
-        onDone()
+        // Role and status always resolve; branch only when a loaded user carries
+        // that branch's id, so a branch change can silently stay when unresolved.
+        updateUser.mutate(
+          {
+            id: user.id,
+            roleId: roleIdByName(roleDefs, role),
+            branchId: branchId(branch),
+            active,
+          },
+          { onSuccess: onDone },
+        )
       }}
     >
       <p className="text-ink-muted text-sm">{user.email}</p>
@@ -541,21 +814,25 @@ function EditForm({ user, roles, onDone }: { user: UserAccount; roles: Role[]; o
         onChange={setActive}
         labelClassName="font-medium"
       />
-      <Actions onCancel={onDone} label="Save" />
+      {updateUser.isError && <p className="text-xs text-red-700">{updateUser.error.message}</p>}
+      <Actions onCancel={onDone} disabled={updateUser.isPending} label={updateUser.isPending ? 'Saving…' : 'Save'} />
     </form>
   )
 }
 
 function RoleForm({ roles, onDone }: { roles: RoleDef[]; onDone: () => void }) {
+  const createRole = useCreateRole()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [base, setBase] = useState<Role>('Coordinator')
+  const base = roles.find((r) => r.name === 'Coordinator') ?? roles[0]
+  const [baseName, setBaseName] = useState<Role>(base?.name ?? '')
   const [permissions, setPermissions] = useState<Permissions>(
-    () => (roles.find((r) => r.name === 'Coordinator') ?? roles[0]).permissions,
+    () => base?.permissions ?? emptyGrid(),
   )
-  const taken = name.trim() !== '' && roleNameTaken(name)
+  const taken = name.trim() !== '' && roleNameTaken(roles, name)
   const valid = name.trim() !== '' && !taken
   const label = 'text-ink text-sm font-semibold'
+  const baseRoleId = roles.find((r) => r.name === baseName)?.id
 
   return (
     <form
@@ -563,8 +840,15 @@ function RoleForm({ roles, onDone }: { roles: RoleDef[]; onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        createRole({ name: name.trim(), description: description.trim(), permissions })
-        onDone()
+        createRole.mutate(
+          {
+            name: name.trim(),
+            description: description.trim(),
+            baseRoleId: baseRoleId || undefined,
+            permissions,
+          },
+          { onSuccess: onDone },
+        )
       }}
     >
       <div className="flex-1 space-y-4 p-5">
@@ -592,61 +876,32 @@ function RoleForm({ roles, onDone }: { roles: RoleDef[]; onDone: () => void }) {
             className={cn(fieldClass, 'h-auto py-2')}
           />
         </label>
-        <label className="block">
-          <span className={label}>Base Template</span>
-          {/* Picking a template replaces the grid below with that role's. */}
-          <SelectBox
-            value={base}
-            onChange={(e) => {
-              setBase(e.target.value)
-              const from = roles.find((r) => r.name === e.target.value)
-              if (from) setPermissions(from.permissions)
-            }}
-            className={fieldClass}
-          >
-            {roles.map((r) => (
-              <option key={r.name} value={r.name}>
-                Copy from {r.name}
-              </option>
-            ))}
-          </SelectBox>
-        </label>
+        {roles.length > 0 && (
+          <label className="block">
+            <span className={label}>Base Template</span>
+            {/* Picking a template replaces the grid below with that role's. */}
+            <SelectBox
+              value={baseName}
+              onChange={(e) => {
+                setBaseName(e.target.value)
+                const from = roles.find((r) => r.name === e.target.value)
+                if (from) setPermissions(from.permissions)
+              }}
+              className={fieldClass}
+            >
+              {roles.map((r) => (
+                <option key={r.id || r.name} value={r.name}>
+                  Copy from {r.name}
+                </option>
+              ))}
+            </SelectBox>
+          </label>
+        )}
 
         <div className="pt-2">
-          <h3 className="text-ink text-xs font-bold tracking-wide uppercase">Module Permissions</h3>
-          <div className="border-line mt-2.5 overflow-hidden rounded-lg border">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-canvas border-line border-b">
-                <tr className="text-ink-muted text-xs">
-                  <th scope="col" className="px-3 py-2 font-medium">Module</th>
-                  {actions.map((a) => (
-                    <th key={a.id} scope="col" className="w-11 py-2 text-center font-medium">
-                      <abbr title={a.label} className="no-underline">{a.short}</abbr>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-line divide-y">
-                {modules.map((m) => (
-                  <tr key={m}>
-                    <th scope="row" className="text-ink px-3 py-2 font-normal">{m}</th>
-                    {actions.map((a) => (
-                      <td key={a.id} className="py-2 text-center">
-                        <input
-                          type="checkbox"
-                          aria-label={`${a.label} ${m}`}
-                          checked={permissions[m].includes(a.id)}
-                          onChange={(e) => setPermissions((p) => togglePermission(p, m, a.id, e.target.checked))}
-                          className="accent-brand-600 size-4 align-middle"
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PermissionGrid permissions={permissions} onChange={setPermissions} />
         </div>
+        {createRole.isError && <p className="text-xs text-red-700">{createRole.error.message}</p>}
       </div>
       <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
         <button
@@ -658,12 +913,17 @@ function RoleForm({ roles, onDone }: { roles: RoleDef[]; onDone: () => void }) {
         </button>
         <button
           type="submit"
-          disabled={!valid}
+          disabled={!valid || createRole.isPending}
           className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
         >
-          Create Role
+          {createRole.isPending ? 'Creating…' : 'Create Role'}
         </button>
       </div>
     </form>
   )
+}
+
+/** An empty grid for the Create Role drawer when no base template is present. */
+function emptyGrid(): Permissions {
+  return Object.fromEntries(modules.map((m) => [m, [] as (typeof actions)[number]['id'][]])) as Permissions
 }

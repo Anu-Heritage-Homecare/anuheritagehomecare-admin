@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { CalendarOff } from 'lucide-react'
+import { CalendarOff, Loader2 } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import {
   VISITS_PAGE_SIZE,
   formatVisitDate,
-  getVisitHistory,
   type VisitRecord,
 } from '../visits-data'
+import { useRecipientVisits } from '../useRecipientVisits'
 import { VisitStats } from './VisitStats'
 import { VisitFilters } from './VisitFilters'
 import { initialFilters } from './visit-filter-state'
@@ -23,24 +23,33 @@ const statusOptions: { value: VisitStatus; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-/**
- * "Today" for the sample data is 2026-07-24 — the same day the Medications tab
- * schedules against. Ranges measure back from there, not the wall clock.
- */
-const RANGE_ANCHOR = new Date('2026-07-24T00:00:00Z').getTime()
 const DAY_MS = 86_400_000
 
-function withinRange(visit: VisitRecord, range: string): boolean {
+/**
+ * The date range filter measures back from the newest visit in hand (or today
+ * when there is none), not the wall clock, so the default window always frames
+ * the rows the server returned.
+ */
+function rangeAnchor(visits: VisitRecord[]): number {
+  let newest = 0
+  for (const visit of visits) {
+    const time = new Date(`${visit.date}T00:00:00Z`).getTime()
+    if (time > newest) newest = time
+  }
+  return newest || Date.now()
+}
+
+function withinRange(visit: VisitRecord, range: string, anchor: number): boolean {
   if (range === 'all') return true
   const days = Number(range)
   if (!Number.isFinite(days)) return true
   const visitTime = new Date(`${visit.date}T00:00:00Z`).getTime()
-  return RANGE_ANCHOR - visitTime <= days * DAY_MS
+  return anchor - visitTime <= days * DAY_MS
 }
 
 export function VisitsTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const history = getVisitHistory(profile.id)
+  const { data: history, isPending, isError, error, refetch } = useRecipientVisits(profile.id)
 
   const [filters, setFilters] = useState<VisitFilterState>(initialFilters)
   const [page, setPage] = useState(1)
@@ -56,10 +65,12 @@ export function VisitsTab() {
     [visits],
   )
 
+  const anchor = useMemo(() => rangeAnchor(visits), [visits])
+
   const rows = useMemo(() => {
     const q = filters.query.trim().toLowerCase()
     return visits.filter((v) => {
-      if (!withinRange(v, filters.range)) return false
+      if (!withinRange(v, filters.range, anchor)) return false
       if (filters.caregiver !== 'all' && v.caregiver !== filters.caregiver)
         return false
       if (filters.type !== 'all' && v.type !== filters.type) return false
@@ -72,9 +83,34 @@ export function VisitsTab() {
         .toLowerCase()
         .includes(q)
     })
-  }, [visits, filters])
+  }, [visits, filters, anchor])
 
-  if (!history) {
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading visit history…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load visit history</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (visits.length === 0) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
         <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">

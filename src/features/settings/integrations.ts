@@ -1,15 +1,14 @@
 /**
- * Integrations — third-party services the organisation has connected.
+ * Integrations and API keys, read from and written to the back office.
  *
- * Only Google Calendar is listed, because it is the only one the Figma draws
- * (drawer-configure-integration). Nothing is really connected: no calendar is
- * read or written, "Test Connection" does not leave the browser, and the
- * connection dates are the design's.
- *
- * Held in memory for the session, like every other settings store in the app.
+ * Integrations come from `GET /admin/security/integrations`; connect/disconnect,
+ * configure and test each hit their own endpoint. API keys come from the
+ * organization context (`GET /admin/organization/api-keys`); create, regenerate
+ * and revoke POST there. The list only returns a masked key value — the full
+ * plaintext secret exists only in the create and regenerate responses, shown once.
  */
-import { useSyncExternalStore } from 'react'
-import { TODAY } from '@/lib/today'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 
 export const syncDirections = ['Two-way Sync', 'CareProfs to Google only', 'Google to CareProfs only'] as const
 export const targetCalendars = ['CareProfs Primary Calendar', 'Care Team Shifts', 'Staff Calendar'] as const
@@ -30,7 +29,7 @@ export interface Integration {
   connected: boolean
   /** "Jul 1, 2026"; null while disconnected. */
   connectedSince: string | null
-  /** "5 minutes ago"; null while disconnected. */
+  /** The last sync timestamp, formatted; null if it never synced. */
   lastSync: string | null
   config: IntegrationConfig
 }
@@ -42,133 +41,235 @@ export interface ApiKey {
   created: string
   createdBy: string
   lastUsed: string
-  /** The characters after the "sk-cp-" prefix. Never drawn in full. */
+  /** The full secret, only ever the masked value from the list — or the raw
+   *  plaintext right after create/regenerate. */
   secret: string
   scopes: string[]
   rateLimitPerHour: number
   usage: { today: number; week: number }
 }
 
-const KEY_PREFIX = 'sk-cp-'
-const SECRET_LENGTH = 32
-
-/*
- * A stand-in secret, made up in the browser. No key is typed into the source:
- * nothing issues or checks keys here, and a literal that looks like one would
- * only trip secret scanners.
- */
-function randomSecret(ending = ''): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(SECRET_LENGTH))
-  const body = Array.from(bytes, (b) => (b % 16).toString(16)).join('')
-  return body.slice(0, SECRET_LENGTH - ending.length) + ending
-}
-
-/** "sk-cp-••••••3f7a": the prefix, dots, and the last four. */
+/** The masked key as the backend already formatted it ("sk-cp-****3f7a"). */
 export function maskedKey(key: ApiKey): string {
-  return `${KEY_PREFIX}${'•'.repeat(SECRET_LENGTH - 4)}${key.secret.slice(-4)}`
+  return key.secret
 }
 
+/** The copyable value: the raw secret after create/regenerate, else the mask. */
 export function fullKey(key: ApiKey): string {
-  return `${KEY_PREFIX}${key.secret}`
-}
-
-const state: { integrations: Integration[]; apiKeys: ApiKey[] } = {
-  apiKeys: [
-    {
-      id: 'mobile-app',
-      name: 'Mobile App Integration',
-      status: 'Active',
-      created: 'Jul 5, 2026',
-      createdBy: 'Adaeze Okonkwo',
-      lastUsed: '2 hours ago',
-      secret: randomSecret('3f7a'),
-      scopes: ['Read Recipients', 'Read Schedules', 'Read/Write Messages'],
-      rateLimitPerHour: 1000,
-      usage: { today: 342, week: 2847 },
-    },
-  ],
-  integrations: [
-    {
-      id: 'google-calendar',
-      name: 'Google Calendar',
-      description: 'Sync visits, staff meetings and task reminders with a shared calendar',
-      connected: true,
-      connectedSince: 'Jul 1, 2026',
-      lastSync: '5 minutes ago',
-      config: {
-        direction: 'Two-way Sync',
-        calendar: 'CareProfs Primary Calendar',
-        events: ['Visits & Care Shifts', 'Staff Meetings', 'Task Reminders'],
-        intervalMinutes: 15,
-      },
-    },
-  ],
-}
-
-let revision = 0
-const listeners = new Set<() => void>()
-
-function emit(): void {
-  revision += 1
-  for (const l of listeners) l()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-export function useIntegrations(): Integration[] {
-  useSyncExternalStore(subscribe, () => revision, () => revision)
-  return state.integrations
-}
-
-function patch(id: string, change: Partial<Integration>): void {
-  state.integrations = state.integrations.map((i) => (i.id === id ? { ...i, ...change } : i))
-  emit()
-}
-
-export function saveConfig(id: string, config: IntegrationConfig): void {
-  patch(id, { config })
-}
-
-/** Stands in for a real round trip: marks a sync as having just happened. */
-export function testConnection(id: string): void {
-  patch(id, { lastSync: 'Just now' })
-}
-
-export function disconnect(id: string): void {
-  patch(id, { connected: false, connectedSince: null, lastSync: null })
-}
-
-export function connect(id: string): void {
-  const since = new Date(`${TODAY}T00:00:00`).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-  patch(id, { connected: true, connectedSince: since, lastSync: 'Just now' })
-}
-
-export function useApiKeys(): ApiKey[] {
-  useSyncExternalStore(subscribe, () => revision, () => revision)
-  return state.apiKeys
-}
-
-function patchKey(id: string, change: Partial<ApiKey>): void {
-  state.apiKeys = state.apiKeys.map((k) => (k.id === id ? { ...k, ...change } : k))
-  emit()
-}
-
-/** A new secret; the old one is gone, so the key has not been used yet. */
-export function regenerateKey(id: string): void {
-  patchKey(id, { secret: randomSecret(), lastUsed: 'Not used yet' })
-}
-
-export function revokeKey(id: string): void {
-  patchKey(id, { status: 'Revoked' })
+  return key.secret
 }
 
 export function formatInterval(minutes: number): string {
   return minutes === 60 ? 'Every hour' : `Every ${minutes} minutes`
+}
+
+/* --------------------------- backend response ----------------------------- */
+
+type IntegrationStatus = 'CONNECTED' | 'DISCONNECTED'
+
+interface IntegrationDto {
+  id: string
+  key: string
+  name: string
+  category: string
+  status: IntegrationStatus
+  description: string | null
+  config: Record<string, unknown> | null
+  connectedAt: string | null
+  lastSyncAt: string | null
+}
+
+type ApiKeyStatus = 'ACTIVE' | 'REVOKED'
+
+interface ApiKeyDto {
+  id: string
+  name: string
+  status: ApiKeyStatus
+  keyPrefix: string
+  last4: string
+  maskedValue: string
+  scopes: string[]
+  rateLimitPerHour: number
+  createdById: string | null
+  createdByName: string | null
+  createdAt: string
+  lastUsedAt: string | null
+  usage: { today: number; thisWeek: number }
+}
+
+interface ApiKeyCreatedDto {
+  key: ApiKeyDto
+  secret: string
+}
+
+/* -------------------------------- enum maps -------------------------------- */
+
+const DIRECTION_FROM_ENUM: Record<string, string> = {
+  TWO_WAY: 'Two-way Sync',
+  INBOUND: 'Google to CareProfs only',
+  OUTBOUND: 'CareProfs to Google only',
+}
+const DIRECTION_TO_ENUM: Record<string, string> = {
+  'Two-way Sync': 'TWO_WAY',
+  'Google to CareProfs only': 'INBOUND',
+  'CareProfs to Google only': 'OUTBOUND',
+}
+
+const EVENT_FROM_ENUM: Record<string, string> = {
+  VISITS_AND_CARE_SHIFTS: 'Visits & Care Shifts',
+  STAFF_MEETINGS: 'Staff Meetings',
+  TASK_REMINDERS: 'Task Reminders',
+}
+const EVENT_TO_ENUM: Record<string, string> = {
+  'Visits & Care Shifts': 'VISITS_AND_CARE_SHIFTS',
+  'Staff Meetings': 'STAFF_MEETINGS',
+  'Task Reminders': 'TASK_REMINDERS',
+}
+
+/* -------------------------------- helpers --------------------------------- */
+
+/** An ISO date to "Jul 1, 2026"; null passes through. */
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * The stored config is the Google Calendar request shape (enum values), or null
+ * if never configured. Map what exists onto the UI labels; anything missing
+ * falls back to the first option rather than being fabricated.
+ */
+function toConfig(raw: Record<string, unknown> | null): IntegrationConfig {
+  const direction = str(raw?.syncDirection)
+  const interval = raw?.autoSyncIntervalMinutes
+  const events = Array.isArray(raw?.syncEvents) ? raw.syncEvents : []
+  return {
+    direction: (direction && DIRECTION_FROM_ENUM[direction]) || syncDirections[0],
+    calendar: str(raw?.targetCalendar) ?? targetCalendars[0],
+    events: events.map((e) => EVENT_FROM_ENUM[String(e)]).filter((e): e is string => Boolean(e)),
+    intervalMinutes: typeof interval === 'number' ? interval : syncIntervals[1],
+  }
+}
+
+function toIntegration(dto: IntegrationDto): Integration {
+  return {
+    id: dto.id,
+    name: dto.name,
+    description: dto.description ?? '',
+    connected: dto.status === 'CONNECTED',
+    connectedSince: formatDate(dto.connectedAt),
+    lastSync: formatDate(dto.lastSyncAt),
+    config: toConfig(dto.config),
+  }
+}
+
+function toApiKey(dto: ApiKeyDto): ApiKey {
+  return {
+    id: dto.id,
+    name: dto.name,
+    status: dto.status === 'ACTIVE' ? 'Active' : 'Revoked',
+    created: formatDate(dto.createdAt) ?? '—',
+    createdBy: dto.createdByName ?? '—',
+    lastUsed: formatDate(dto.lastUsedAt) ?? 'Not used yet',
+    secret: dto.maskedValue,
+    scopes: dto.scopes,
+    rateLimitPerHour: dto.rateLimitPerHour,
+    usage: { today: dto.usage.today, week: dto.usage.thisWeek },
+  }
+}
+
+/* ------------------------------ integrations ------------------------------ */
+
+const INTEGRATIONS_KEY = ['admin', 'integrations'] as const
+
+export function useIntegrations() {
+  return useQuery({
+    queryKey: INTEGRATIONS_KEY,
+    queryFn: async () =>
+      (await api.get<IntegrationDto[]>('/admin/security/integrations')).map(toIntegration),
+  })
+}
+
+export interface TestResult {
+  ok: boolean
+  message: string
+}
+
+export function useIntegrationMutations() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: INTEGRATIONS_KEY })
+
+  const saveConfig = useMutation({
+    mutationFn: ({ id, config }: { id: string; config: IntegrationConfig }) =>
+      api.patch(`/admin/security/integrations/${id}/config`, {
+        syncDirection: DIRECTION_TO_ENUM[config.direction],
+        targetCalendar: config.calendar,
+        syncEvents: config.events.map((e) => EVENT_TO_ENUM[e]).filter(Boolean),
+        autoSyncIntervalMinutes: config.intervalMinutes,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const setConnected = useMutation({
+    mutationFn: ({ id, connected }: { id: string; connected: boolean }) =>
+      api.patch(`/admin/security/integrations/${id}/status`, {
+        status: connected ? 'CONNECTED' : 'DISCONNECTED',
+      }),
+    onSuccess: invalidate,
+  })
+
+  const testConnection = useMutation({
+    mutationFn: (id: string) => api.post<TestResult>(`/admin/security/integrations/${id}/test`),
+    onSuccess: invalidate,
+  })
+
+  return { saveConfig, setConnected, testConnection }
+}
+
+/* -------------------------------- api keys -------------------------------- */
+
+const API_KEYS_KEY = ['admin', 'api-keys'] as const
+
+export function useApiKeys() {
+  return useQuery({
+    queryKey: API_KEYS_KEY,
+    queryFn: async () =>
+      (await api.get<ApiKeyDto[]>('/admin/organization/api-keys')).map(toApiKey),
+  })
+}
+
+export interface CreateApiKeyInput {
+  name: string
+  scopes: string[]
+  rateLimitPerHour?: number
+}
+
+export function useApiKeyMutations() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: API_KEYS_KEY })
+
+  /** Both create and regenerate return the one-time plaintext secret. */
+  const create = useMutation({
+    mutationFn: (input: CreateApiKeyInput) =>
+      api.post<ApiKeyCreatedDto>('/admin/organization/api-keys', input),
+    onSuccess: invalidate,
+  })
+
+  const regenerate = useMutation({
+    mutationFn: (id: string) =>
+      api.post<ApiKeyCreatedDto>(`/admin/organization/api-keys/${id}/regenerate`),
+    onSuccess: invalidate,
+  })
+
+  const revoke = useMutation({
+    mutationFn: (id: string) =>
+      api.post<ApiKeyDto>(`/admin/organization/api-keys/${id}/revoke`),
+    onSuccess: invalidate,
+  })
+
+  return { create, regenerate, revoke }
 }

@@ -66,6 +66,7 @@ export function createRefund(input: {
     accountId: payment.accountId,
     txId: payment.tx.id,
     amount,
+    currency: 'NGN',
     method: input.method,
     at: TODAY,
     status: 'pending',

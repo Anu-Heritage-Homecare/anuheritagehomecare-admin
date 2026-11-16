@@ -1,25 +1,21 @@
 import { useMemo } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
-import { CircleAlert, Download, Layers, X } from 'lucide-react'
+import { Download, Layers, Loader2, X } from 'lucide-react'
 import {
-  failedPayment,
   formatMoney,
-  hoursPackageFor,
   planById,
   plans,
-  renewalsDue,
-  subscriptions,
 } from '@/features/billing/data'
 import type {
   PlanId,
-  Subscription,
   SubscriptionStatus,
-  Transaction,
 } from '@/features/billing/data'
+import { getSubscriptionDetail } from '@/features/billing/subscription-detail'
 import {
-  familyNameFor,
-  getSubscriptionDetail,
-} from '@/features/billing/subscription-detail'
+  useSubscriptions,
+  useSubscriptionKpis,
+} from '@/features/billing/useSubscriptions'
+import type { SubscriptionRow } from '@/features/billing/useSubscriptions'
 import {
   ActivityPanel,
   AuditPanel,
@@ -32,14 +28,6 @@ import {
   PaymentsPanel,
   RenewalsPanel,
 } from '@/features/billing/SubscriptionTabs'
-import {
-  ACTIVE_RECIPIENTS,
-  DISCHARGED_RECIPIENTS,
-  ON_HOLD_RECIPIENTS,
-  recipients,
-} from '@/features/care-recipients/data'
-import { getRecipientProfile } from '@/features/care-recipients/profile-data'
-import { getCaregiverRecord, roleFor } from '@/features/care-recipients/caregivers-data'
 import { Panel } from '@/components/ui/Panel'
 import { SelectFilter } from '@/components/ui/SelectFilter'
 import { cn } from '@/lib/cn'
@@ -79,47 +67,56 @@ const statusStyles: Record<SubscriptionStatus, { label: string; tone: string }> 
 const chip =
   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap'
 
-/** One denormalised row, all of it derived from the owning modules. */
-interface Row {
-  sub: Subscription
-  familyName: string
-  patient: string
-  age: number
-  coordinator: string
-  caregiver: string
-  caregiverRole: string | undefined
-  hoursLabel: string
-  hoursPercent: number | null
-  /** The last failed charge on this plan, if any. */
-  failed: Transaction | undefined
+/** The live backend status enum, mapped to the page's status chip keys. */
+function toStatusKey(status: string): SubscriptionStatus {
+  switch (status.toUpperCase()) {
+    case 'ACTIVE':
+      return 'active'
+    case 'PAUSED':
+    case 'ON_HOLD':
+      return 'paused'
+    case 'CANCELLED':
+    case 'CANCELED':
+      return 'cancelled'
+    default:
+      return 'pending'
+  }
 }
 
-function buildRows(): Row[] {
-  return subscriptions.map((sub) => {
-    const recipient = recipients.find((r) => r.id === sub.recipientId)!
-    const profile = getRecipientProfile(sub.recipientId)
-    const team = getCaregiverRecord(sub.recipientId)?.team
-    const primary = team?.find((m) => m.primary) ?? team?.[0]
-    // The row's own package, not a module-level one: a second flexible
-    // subscriber would otherwise inherit Patricia Brown's balance and expiry.
-    const pkg = hoursPackageFor(sub.recipientId)
-    const percent = pkg ? Math.round((pkg.used / pkg.purchased) * 100) : null
+/** One table row, read straight from the live enriched subscription. */
+interface Row {
+  id: string
+  familyName: string
+  patient: string
+  age: number | null
+  planName: string
+  statusKey: SubscriptionStatus
+  cycle: string
+  coordinator: string
+  caregiver: string
+  autoRenew: boolean
+  renewalDate: string | null
+  hoursLabel: string
+  hoursPercent: number | null
+}
 
-    return {
-      sub,
-      familyName: familyNameFor(recipient.name),
-      patient: recipient.name,
-      age: recipient.age,
-      coordinator: profile?.summary.coordinator ?? 'Unassigned',
-      caregiver: primary?.name ?? 'Unassigned',
-      caregiverRole: primary ? roleFor(sub.recipientId, primary.name) : undefined,
-      hoursLabel: pkg
-        ? `${pkg.purchased - pkg.used}h left`
-        : 'Not applicable',
-      hoursPercent: percent,
-      failed: failedPayment(sub),
-    }
-  })
+function toRow(live: SubscriptionRow): Row {
+  const h = live.flexibleHours
+  return {
+    id: live.id,
+    familyName: live.familyName,
+    patient: live.patient,
+    age: live.age,
+    planName: live.planName,
+    statusKey: toStatusKey(live.status),
+    cycle: live.billingCycle,
+    coordinator: live.coordinator,
+    caregiver: live.caregiver,
+    autoRenew: live.autoRenew,
+    renewalDate: live.renewalDate,
+    hoursLabel: h ? `${h.remainingHours}h left` : 'Not applicable',
+    hoursPercent: h ? h.percentUsed : null,
+  }
 }
 
 export function SubscriptionsPage() {
@@ -146,7 +143,22 @@ export function SubscriptionsPage() {
     setParams(next, { replace: true })
   }
 
-  const rows = useMemo(() => buildRows(), [])
+  // One market, USD by default (the backend default for plans and billing).
+  // The backend status enum keys off the page's lowercase chip filter.
+  const backendStatus =
+    status === 'all'
+      ? null
+      : status === 'paused'
+        ? 'PAUSED'
+        : status === 'cancelled'
+          ? 'CANCELLED'
+          : status === 'pending'
+            ? 'PENDING_ACTIVATION'
+            : 'ACTIVE'
+  const list = useSubscriptions('USD', backendStatus, 1, 100)
+  const kpis = useSubscriptionKpis('USD')
+
+  const rows = useMemo(() => (list.data?.rows ?? []).map(toRow), [list.data])
 
   /*
    * Rebuilt rather than passed through, so an unrecognised `plan` value is
@@ -165,21 +177,21 @@ export function SubscriptionsPage() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return rows.filter((row) => {
-      if (status !== 'all' && row.sub.status !== status) return false
-      if (planFilter && row.sub.planId !== planFilter) return false
+      if (status !== 'all' && row.statusKey !== status) return false
       if (!needle) return true
       return (
         row.familyName.toLowerCase().includes(needle) ||
         row.patient.toLowerCase().includes(needle) ||
-        planById[row.sub.planId].name.toLowerCase().includes(needle) ||
+        row.planName.toLowerCase().includes(needle) ||
         row.coordinator.toLowerCase().includes(needle) ||
         row.caregiver.toLowerCase().includes(needle)
       )
     })
-  }, [rows, query, status, planFilter])
+  }, [rows, query, status])
 
-  // Rebuilding the record on every keystroke in the filter box means re-sorting
-  // the invoice, timeline and audit lists for a panel that hasn't changed.
+  // The detail drawer still renders from the local fixture, which only resolves
+  // the local subscription ids; the live table carries backend UUIDs, so a live
+  // row has no fixture detail. See the scope note on the hook.
   const detail = useMemo(() => getSubscriptionDetail(subId), [subId])
 
   // A subscription id that doesn't resolve is a dead end, not an empty panel.
@@ -190,53 +202,25 @@ export function SubscriptionsPage() {
   if (subId && !isTab(tab))
     return <Navigate to={`/billing/subscriptions/${subId}/overview${suffix}`} replace />
 
-  /*
-   * Three tiles are org-wide because the directory publishes those totals; the
-   * other three can only see the eight tracked rows. Mixing the two scopes
-   * without saying so is how "6 renewals out of 1,247" happens.
-   */
+  // Live counts for this market, from the KPI endpoint.
+  const k = kpis.data
   const tiles: {
     id: string
     label: string
     value: number
     hint: string
   }[] = [
-    {
-      id: 'active',
-      label: 'Active',
-      value: ACTIVE_RECIPIENTS,
-      hint: 'Organisation-wide',
-    },
-    {
-      id: 'paused',
-      label: 'Paused',
-      value: ON_HOLD_RECIPIENTS,
-      hint: 'Organisation-wide, on hold',
-    },
-    {
-      id: 'cancelled',
-      label: 'Cancelled',
-      value: DISCHARGED_RECIPIENTS,
-      hint: 'Organisation-wide, discharged',
-    },
+    { id: 'active', label: 'Active', value: k?.totalActive ?? 0, hint: 'This market' },
+    { id: 'paused', label: 'Paused', value: k?.paused ?? 0, hint: 'This market' },
+    { id: 'cancelled', label: 'Cancelled', value: k?.cancelled ?? 0, hint: 'This market' },
     {
       id: 'pending',
       label: 'Pending activation',
-      value: rows.filter((r) => r.sub.status === 'pending').length,
-      hint: 'Tracked accounts',
+      value: k?.pendingActivation ?? 0,
+      hint: 'This market',
     },
-    {
-      id: 'renewing',
-      label: 'Renewing in 7 days',
-      value: renewalsDue(7).length,
-      hint: 'Tracked accounts',
-    },
-    {
-      id: 'hours',
-      label: 'Hours packages',
-      value: rows.filter((r) => r.hoursPercent !== null).length,
-      hint: 'Tracked accounts',
-    },
+    { id: 'renewing', label: 'Renewing soon', value: k?.renewingSoon ?? 0, hint: 'This market' },
+    { id: 'expiring', label: 'Expiring', value: k?.expiring ?? 0, hint: 'This market' },
   ]
 
   const activePlan = planFilter ? plans.find((p) => p.id === planFilter) : undefined
@@ -325,7 +309,24 @@ export function SubscriptionsPage() {
           )}
         </div>
 
-        {filtered.length === 0 ? (
+        {list.isPending ? (
+          <div className="text-ink-subtle flex items-center justify-center gap-2 border-line border-t py-16 text-sm">
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+            Loading subscriptions…
+          </div>
+        ) : list.isError ? (
+          <div className="border-line flex flex-col items-center gap-3 border-t p-10 text-center">
+            <p className="text-ink text-sm font-medium">Could not load subscriptions.</p>
+            <p className="text-ink-subtle text-sm">{list.error.message}</p>
+            <button
+              type="button"
+              onClick={() => void list.refetch()}
+              className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
           <p className="text-ink-subtle border-line border-t px-4 py-10 text-center text-sm">
             No subscriptions match these filters.
           </p>
@@ -364,10 +365,10 @@ export function SubscriptionsPage() {
                 </thead>
                 <tbody className="divide-line divide-y">
                   {filtered.map((row) => {
-                    const selected = row.sub.id === subId
+                    const selected = row.id === subId
                     return (
                       <tr
-                        key={row.sub.id}
+                        key={row.id}
                         aria-current={selected ? 'true' : undefined}
                         className={cn(
                           'transition-colors',
@@ -376,36 +377,28 @@ export function SubscriptionsPage() {
                       >
                         <th scope="row" className="px-4 py-3 font-normal whitespace-nowrap">
                           <Link
-                            to={recordPath(row.sub.id)}
+                            to={recordPath(row.id)}
                             className="text-ink hover:text-brand-700 font-medium"
                           >
                             {row.familyName}
                           </Link>
                         </th>
                         <td className="text-ink-muted px-4 py-3 whitespace-nowrap">
-                          {row.patient}{' '}
-                          <span className="text-ink-subtle">({row.age})</span>
+                          {row.patient}
+                          {row.age !== null && (
+                            <span className="text-ink-subtle"> ({row.age})</span>
+                          )}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <Link
-                            to={`/billing/plans/${row.sub.planId}/general`}
-                            className="text-brand-700 hover:text-brand-800 font-medium"
-                          >
-                            {planById[row.sub.planId].name}
-                          </Link>
+                        <td className="text-ink-muted px-4 py-3 whitespace-nowrap">
+                          {row.planName}
                         </td>
                         <td className="text-ink-muted px-4 py-3 whitespace-nowrap">
                           {row.coordinator}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className="text-ink-muted">{row.caregiver}</span>
-                          {row.caregiverRole && (
-                            <span className="text-ink-subtle block text-xs">
-                              {row.caregiverRole}
-                            </span>
-                          )}
                         </td>
-                        <td className="text-ink-muted px-4 py-3">{row.sub.cycle}</td>
+                        <td className="text-ink-muted px-4 py-3">{row.cycle}</td>
                         <td className="text-ink-muted px-4 py-3 whitespace-nowrap tabular-nums">
                           {row.hoursPercent === null ? (
                             <span className="text-ink-subtle">Not applicable</span>
@@ -429,47 +422,34 @@ export function SubscriptionsPage() {
                         <td
                           className={cn(
                             'px-4 py-3 whitespace-nowrap',
-                            row.sub.renewsAt ? 'text-ink-muted' : 'text-ink-subtle',
+                            row.renewalDate ? 'text-ink-muted' : 'text-ink-subtle',
                           )}
                         >
-                          {row.sub.renewsAt
-                            ? new Date(`${row.sub.renewsAt}T00:00:00Z`).toLocaleDateString(
-                                'en-US',
-                                { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' },
-                              )
-                            : row.sub.invoiceBilled
-                              ? 'Billed by invoice'
-                              : row.sub.status === 'pending'
-                                ? 'Awaiting start'
-                                : 'Not scheduled'}
+                          {row.renewalDate
+                            ? new Date(row.renewalDate).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                timeZone: 'UTC',
+                              })
+                            : row.statusKey === 'pending'
+                              ? 'Awaiting start'
+                              : 'Not scheduled'}
                         </td>
                         <td className="px-4 py-3">
                           <span
                             className={cn(
                               'text-xs font-semibold',
-                              row.sub.autoRenew ? 'text-emerald-700' : 'text-ink-subtle',
+                              row.autoRenew ? 'text-emerald-700' : 'text-ink-subtle',
                             )}
                           >
-                            {row.sub.autoRenew ? 'On' : 'Off'}
+                            {row.autoRenew ? 'On' : 'Off'}
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={cn(chip, statusStyles[row.sub.status].tone)}>
-                            {statusStyles[row.sub.status].label}
+                          <span className={cn(chip, statusStyles[row.statusKey].tone)}>
+                            {statusStyles[row.statusKey].label}
                           </span>
-                          {/* The cycle date rolls forward after a bounce, so
-                              without this the row reads Active, auto-renew on,
-                              and nothing owing. */}
-                          {row.failed && (
-                            <span className="mt-1 flex items-center gap-1 text-xs font-semibold text-red-700">
-                              <CircleAlert
-                                className="size-3 shrink-0"
-                                strokeWidth={2.5}
-                                aria-hidden="true"
-                              />
-                              Last charge failed
-                            </span>
-                          )}
                         </td>
                       </tr>
                     )
@@ -481,39 +461,30 @@ export function SubscriptionsPage() {
             <ul className="divide-line border-line divide-y border-t xl:hidden">
               {filtered.map((row) => (
                 <li
-                  key={row.sub.id}
-                  className={cn('p-4', row.sub.id === subId && 'bg-brand-50')}
+                  key={row.id}
+                  className={cn('p-4', row.id === subId && 'bg-brand-50')}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <Link
-                        to={recordPath(row.sub.id)}
+                        to={recordPath(row.id)}
                         className="text-ink hover:text-brand-700 text-sm font-semibold break-words"
                       >
                         {row.familyName}
                       </Link>
                       <p className="text-ink-subtle mt-0.5 text-xs break-words">
-                        {row.patient} ({row.age}) · {planById[row.sub.planId].name}
+                        {row.patient}
+                        {row.age !== null && ` (${row.age})`} · {row.planName}
                       </p>
                     </div>
-                    <span className={cn(chip, statusStyles[row.sub.status].tone)}>
-                      {statusStyles[row.sub.status].label}
+                    <span className={cn(chip, statusStyles[row.statusKey].tone)}>
+                      {statusStyles[row.statusKey].label}
                     </span>
                   </div>
                   <p className="text-ink-muted mt-2 text-sm break-words">
-                    {row.coordinator} · {row.caregiver} · {row.sub.cycle}
+                    {row.coordinator} · {row.caregiver} · {row.cycle}
                     {row.hoursPercent !== null && ` · ${row.hoursLabel}`}
                   </p>
-                  {row.failed && (
-                    <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-red-700">
-                      <CircleAlert
-                        className="size-3 shrink-0"
-                        strokeWidth={2.5}
-                        aria-hidden="true"
-                      />
-                      Last charge failed ({row.failed.id})
-                    </p>
-                  )}
                 </li>
               ))}
             </ul>
@@ -521,9 +492,7 @@ export function SubscriptionsPage() {
         )}
 
         <p className="text-ink-subtle border-line border-t px-4 py-3 text-xs">
-          Showing {filtered.length} of {rows.length} tracked subscriptions. The
-          workspace follows these accounts; the tiles above marked
-          organisation-wide come from the care directory.
+          Showing {filtered.length} of {rows.length} subscriptions in this market.
         </p>
       </Panel>
 
@@ -622,7 +591,7 @@ export function SubscriptionsPage() {
         <Link to="/billing/plans/standard/general" className="text-brand-700">
           care plan catalogue
         </Link>
-        ; {formatMoney(planById['standard' as PlanId].monthlyPrice)} is the
+        ; {formatMoney(planById['standard' as PlanId].monthlyPrice, 'NGN')} is the
         Standard list price.
       </p>
     </div>

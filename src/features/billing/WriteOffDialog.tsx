@@ -67,11 +67,11 @@ function WriteOffForm({ invoice, account, onClose }: { invoice: LedgerInvoice; a
         </div>
         <div className="border-line flex justify-between gap-4 border-t pt-2.5">
           <dt className="text-ink-muted">Original Amount</dt>
-          <dd className="text-ink font-semibold tabular-nums">{formatMoney(invoice.amount)}</dd>
+          <dd className="text-ink font-semibold tabular-nums">{formatMoney(invoice.amount, 'NGN')}</dd>
         </div>
         <div className="flex items-center justify-between gap-4">
           <dt className="text-ink-muted">Write-off Amount</dt>
-          <dd className="text-lg font-bold text-red-600 tabular-nums">{formatMoney(amount)}</dd>
+          <dd className="text-lg font-bold text-red-600 tabular-nums">{formatMoney(amount, 'NGN')}</dd>
         </div>
       </dl>
       {amount < invoice.amount && (

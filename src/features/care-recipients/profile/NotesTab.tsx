@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { ArrowUpDown, NotebookPen, Search, UserRound } from 'lucide-react'
+import { ArrowUpDown, Loader2, NotebookPen, Search, UserRound } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
+import { useAcknowledgeNote, useRecipientNotes } from '../useRecipientNotes'
 import {
   NOTES_PAGE_SIZE,
   authors,
   categoryCounts,
   flaggedCount,
-  getCareNotes,
   noteCategories,
   noteSortOptions,
   notesThisMonth,
@@ -24,14 +24,22 @@ type CategoryFilter = NoteCategory | 'all'
 
 export function NotesTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const notes = useMemo(() => getCareNotes(profile.id), [profile.id])
+  const { data, isPending, isError, error, refetch } = useRecipientNotes(profile.id)
+  const acknowledge = useAcknowledgeNote(profile.id)
+  const notes = useMemo(() => data ?? [], [data])
 
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [author, setAuthor] = useState('all')
   const [sort, setSort] = useState<NoteSort>('latest')
   const [query, setQuery] = useState('')
   const [visible, setVisible] = useState(NOTES_PAGE_SIZE)
-  const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set())
+
+  // Acknowledged ids off the mapped notes, so the filtered/sorted rows (typed
+  // as the base note without the flag) can still show the state.
+  const acknowledgedIds = useMemo(
+    () => new Set(notes.filter((n) => n.acknowledged).map((n) => n.id)),
+    [notes],
+  )
 
   const flagged = flaggedCount(notes)
   const thisMonth = notesThisMonth(notes)
@@ -81,13 +89,37 @@ export function NotesTab() {
       setVisible(NOTES_PAGE_SIZE)
     }
 
-  const toggleAcknowledge = (id: string) =>
-    setAcknowledged((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  // One way: the DTO's `acknowledged` is the source of truth, so a tick posts
+  // the acknowledgement and the re-read reflects it. Already acknowledged notes
+  // do not post again.
+  const acknowledgeNote = (id: string) => {
+    if (!acknowledgedIds.has(id)) acknowledge.mutate(id)
+  }
+
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading care notes…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load care notes</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   if (notes.length === 0) {
     return (
@@ -295,8 +327,8 @@ export function NotesTab() {
               <NoteCard
                 key={note.id}
                 note={note}
-                acknowledged={acknowledged.has(note.id)}
-                onAcknowledge={toggleAcknowledge}
+                acknowledged={acknowledgedIds.has(note.id)}
+                onAcknowledge={acknowledgeNote}
               />
             ))}
           </ul>

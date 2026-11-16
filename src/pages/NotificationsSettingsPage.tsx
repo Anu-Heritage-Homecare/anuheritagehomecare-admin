@@ -1,29 +1,22 @@
 import { useState } from 'react'
-import { Settings, SquarePen } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Loader2, SquarePen } from 'lucide-react'
 import {
   channelOptions,
   formatMinutes,
   lateOptions,
   leadOptions,
   recipientOptions,
-  setConfig,
-  setEmergency,
-  setReminders,
-  setRule,
   smsProviders,
   triggerOptions,
+  useNotificationMutations,
   useNotificationSettings,
-  validEmail,
-  validSenderId,
 } from '@/features/settings/notifications'
 import type {
   Channel,
-  ChannelConfig,
   EmergencyAlerts,
   NotificationRule,
+  NotificationsView,
   ReminderRules,
-  SmsProvider,
 } from '@/features/settings/notifications'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
@@ -33,7 +26,7 @@ import { SelectBox } from '@/components/ui/SelectBox'
 const fieldClass =
   'border-control focus:border-brand-500 bg-surface mt-1.5 h-10 w-full rounded-lg border px-3 text-sm'
 
-type Dialog = Channel | 'reminders' | 'emergency' | null
+type Dialog = 'reminders' | 'emergency' | null
 
 function Card({
   title,
@@ -41,7 +34,7 @@ function Card({
   children,
 }: {
   title: string
-  action: React.ReactNode
+  action?: React.ReactNode
   children: React.ReactNode
 }) {
   const id = `notify-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
@@ -65,9 +58,8 @@ function CardButton({
   onClick,
 }: {
   label: string
-  /** What it acts on, for assistive tech — four of these read "Configure". */
   name: string
-  icon: LucideIcon
+  icon: typeof SquarePen
   onClick: () => void
 }) {
   return (
@@ -83,7 +75,17 @@ function CardButton({
   )
 }
 
-function Rules({ channel, rules }: { channel: Channel; rules: NotificationRule[] }) {
+function Rules({
+  channel,
+  rules,
+  onToggle,
+  pendingKey,
+}: {
+  channel: Channel
+  rules: NotificationRule[]
+  onToggle: (channel: Channel, key: string, on: boolean) => void
+  pendingKey: string | null
+}) {
   return (
     <ul className="divide-line divide-y">
       {rules.map((r) => (
@@ -93,7 +95,8 @@ function Rules({ channel, rules }: { channel: Channel; rules: NotificationRule[]
             label={r.label}
             hint={r.hint}
             checked={r.on}
-            onChange={(v) => setRule(channel, r.id, v)}
+            disabled={pendingKey === `${channel}:${r.id}`}
+            onChange={(v) => onToggle(channel, r.id, v)}
             className="items-center"
             labelClassName="font-semibold"
           />
@@ -122,12 +125,17 @@ function Stacked({ label, danger, children }: { label: string; danger?: boolean;
 }
 
 export function NotificationsSettingsPage() {
-  const s = useNotificationSettings()
+  const { data, isPending, isError, error, refetch } = useNotificationSettings()
+  const { setToggle, setReminders, setEmergency, setSmsProvider } = useNotificationMutations()
   const [dialog, setDialog] = useState<Dialog>(null)
   const close = () => setDialog(null)
-  const configure = (channel: Channel, name: string) => (
-    <CardButton label="Configure" name={`Configure ${name}`} icon={Settings} onClick={() => setDialog(channel)} />
-  )
+
+  const onToggle = (channel: Channel, key: string, on: boolean): void => {
+    setToggle.mutate({ channel, key, enabled: on })
+  }
+  const pendingKey = setToggle.isPending
+    ? `${setToggle.variables.channel}:${setToggle.variables.key}`
+    : null
 
   return (
     <div className="space-y-5">
@@ -138,9 +146,75 @@ export function NotificationsSettingsPage() {
         </p>
       </header>
 
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading notifications…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load notification settings.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Loaded
+          data={data}
+          dialog={dialog}
+          setDialog={setDialog}
+          close={close}
+          onToggle={onToggle}
+          pendingKey={pendingKey}
+          saveReminders={(r) => setReminders.mutate(r, { onSuccess: close })}
+          savingReminders={setReminders.isPending}
+          saveEmergency={(e) => setEmergency.mutate(e, { onSuccess: close })}
+          savingEmergency={setEmergency.isPending}
+          saveSmsProvider={(name) => setSmsProvider.mutate(name)}
+          savingSmsProvider={setSmsProvider.isPending}
+        />
+      )}
+    </div>
+  )
+}
+
+function Loaded({
+  data,
+  dialog,
+  setDialog,
+  close,
+  onToggle,
+  pendingKey,
+  saveReminders,
+  savingReminders,
+  saveEmergency,
+  savingEmergency,
+  saveSmsProvider,
+  savingSmsProvider,
+}: {
+  data: NotificationsView
+  dialog: Dialog
+  setDialog: (d: Dialog) => void
+  close: () => void
+  onToggle: (channel: Channel, key: string, on: boolean) => void
+  pendingKey: string | null
+  saveReminders: (r: ReminderRules) => void
+  savingReminders: boolean
+  saveEmergency: (e: EmergencyAlerts) => void
+  savingEmergency: boolean
+  saveSmsProvider: (name: string | null) => void
+  savingSmsProvider: boolean
+}) {
+  return (
+    <>
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
-        <Card title="Email Notifications" action={configure('email', 'email notifications')}>
-          <Rules channel="email" rules={s.rules.email} />
+        <Card title="Email Notifications">
+          <Rules channel="email" rules={data.rules.email} onToggle={onToggle} pendingKey={pendingKey} />
         </Card>
 
         <div className="space-y-5">
@@ -150,11 +224,11 @@ export function NotificationsSettingsPage() {
           >
             <dl className="divide-line divide-y">
               <Line label="Caregiver Reminder">
-                <span className="font-semibold">{formatMinutes(s.reminders.caregiverMinutes)} before</span>
+                <span className="font-semibold">{formatMinutes(data.reminders.caregiverMinutes)} before</span>
               </Line>
-              <Line label="Family Notification">{formatMinutes(s.reminders.familyMinutes)} before start</Line>
+              <Line label="Family Notification">{formatMinutes(data.reminders.familyMinutes)} before start</Line>
               <Line label="Coordinator Alert">
-                <span className="font-medium text-red-600">If late by {formatMinutes(s.reminders.lateMinutes)}</span>
+                <span className="font-medium text-red-600">If late by {formatMinutes(data.reminders.lateMinutes)}</span>
               </Line>
             </dl>
           </Card>
@@ -164,82 +238,68 @@ export function NotificationsSettingsPage() {
             action={<CardButton label="Edit" name="Edit emergency alerts" icon={SquarePen} onClick={() => setDialog('emergency')} />}
           >
             <dl className="divide-line divide-y">
-              <Stacked label="Recipients">{s.emergency.recipients.join(', ')}</Stacked>
-              <Stacked label="Channels">{s.emergency.channels.join(' + ')}</Stacked>
-              <Stacked label="Triggers" danger>{s.emergency.triggers.join(', ')}</Stacked>
+              <Stacked label="Recipients">{data.emergency.recipients.join(', ') || '—'}</Stacked>
+              <Stacked label="Channels">{data.emergency.channels.join(' + ') || '—'}</Stacked>
+              <Stacked label="Triggers" danger>{data.emergency.triggers.join(', ') || '—'}</Stacked>
             </dl>
           </Card>
         </div>
 
-        <Card title="SMS Notifications" action={configure('sms', 'SMS notifications')}>
-          <Rules channel="sms" rules={s.rules.sms} />
+        <Card title="SMS Notifications">
+          <Rules channel="sms" rules={data.rules.sms} onToggle={onToggle} pendingKey={pendingKey} />
           <div className="border-line mt-3 flex items-center justify-between gap-4 border-t pt-3">
             <span className="text-ink-muted text-sm font-medium">SMS Provider Integration</span>
             <span className="flex items-center gap-2">
-              <span className="text-ink text-sm font-semibold">{s.config.sms.provider}</span>
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[0.6875rem] font-semibold text-emerald-700">
-                Connected
-              </span>
+              <SelectBox
+                aria-label="SMS provider"
+                value={data.smsProvider.name ?? ''}
+                disabled={savingSmsProvider}
+                onChange={(e) => saveSmsProvider(e.target.value)}
+                className="border-control focus:border-brand-500 bg-surface h-9 rounded-lg border px-3 text-sm font-semibold"
+              >
+                {data.smsProvider.name === null && <option value="">Not set</option>}
+                {smsProviders.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </SelectBox>
+              {data.smsProvider.connected && (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[0.6875rem] font-semibold text-emerald-700">
+                  Connected
+                </span>
+              )}
             </span>
           </div>
         </Card>
 
-        <Card title="Push Notifications" action={configure('push', 'push notifications')}>
-          <Rules channel="push" rules={s.rules.push} />
+        <Card title="Push Notifications">
+          <Rules channel="push" rules={data.rules.push} onToggle={onToggle} pendingKey={pendingKey} />
         </Card>
       </div>
 
-      <Drawer open={dialog === 'email'} onClose={close} title="Configure email" placement="center">
-        <EmailForm config={s.config.email} onDone={close} />
-      </Drawer>
-      <Drawer open={dialog === 'sms'} onClose={close} title="Configure SMS" placement="center">
-        <SmsForm config={s.config.sms} onDone={close} />
-      </Drawer>
-      <Drawer open={dialog === 'push'} onClose={close} title="Configure push" placement="center">
-        <PushForm config={s.config.push} onDone={close} />
-      </Drawer>
       <Drawer open={dialog === 'reminders'} onClose={close} title="Edit visit reminder rules" placement="center">
-        <RemindersForm reminders={s.reminders} onDone={close} />
+        <RemindersForm reminders={data.reminders} onSave={saveReminders} saving={savingReminders} onCancel={close} />
       </Drawer>
       <Drawer open={dialog === 'emergency'} onClose={close} title="Edit emergency alerts" placement="center">
-        <EmergencyForm emergency={s.emergency} onDone={close} />
+        <EmergencyForm emergency={data.emergency} availableTriggers={data.availableTriggers} onSave={saveEmergency} saving={savingEmergency} onCancel={close} />
       </Drawer>
-    </div>
+    </>
   )
 }
 
 /* ---------------------------------- forms ---------------------------------- */
 /* Each holds a local draft; nothing changes until Save. */
 
-function Text({
-  label,
-  value,
-  onChange,
-  error,
-  type = 'text',
+function Actions({
+  onCancel,
+  disabled = false,
+  saving = false,
 }: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  error?: string | false
-  type?: string
+  onCancel: () => void
+  disabled?: boolean
+  saving?: boolean
 }) {
-  return (
-    <label className="block">
-      <span className="text-ink text-sm font-medium">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={error ? true : undefined}
-        className={cn(fieldClass, error && 'border-red-500')}
-      />
-      {error && <span className="mt-1 block text-xs text-red-700">{error}</span>}
-    </label>
-  )
-}
-
-function Actions({ onCancel, disabled = false }: { onCancel: () => void; disabled?: boolean }) {
   return (
     <div className="flex justify-end gap-2 pt-1">
       <button
@@ -251,84 +311,13 @@ function Actions({ onCancel, disabled = false }: { onCancel: () => void; disable
       </button>
       <button
         type="submit"
-        disabled={disabled}
-        className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+        disabled={disabled || saving}
+        className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white"
       >
+        {saving && <Loader2 className="size-4 animate-spin" strokeWidth={2} />}
         Save
       </button>
     </div>
-  )
-}
-
-function EmailForm({ config, onDone }: { config: ChannelConfig['email']; onDone: () => void }) {
-  const [senderName, setSenderName] = useState(config.senderName)
-  const [replyTo, setReplyTo] = useState(config.replyTo)
-  const emailOk = validEmail(replyTo)
-  const valid = senderName.trim() !== '' && emailOk
-
-  return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!valid) return
-        setConfig('email', { senderName: senderName.trim(), replyTo: replyTo.trim() })
-        onDone()
-      }}
-    >
-      <Text label="Sender name" value={senderName} onChange={setSenderName} error={senderName.trim() === '' && 'Enter a sender name.'} />
-      <Text label="Reply-to address" type="email" value={replyTo} onChange={setReplyTo} error={!emailOk && 'Enter a valid email address.'} />
-      <Actions onCancel={onDone} disabled={!valid} />
-    </form>
-  )
-}
-
-function SmsForm({ config, onDone }: { config: ChannelConfig['sms']; onDone: () => void }) {
-  const [provider, setProvider] = useState<SmsProvider>(config.provider)
-  const [senderId, setSenderId] = useState(config.senderId)
-  const valid = validSenderId(senderId)
-
-  return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!valid) return
-        setConfig('sms', { provider, senderId })
-        onDone()
-      }}
-    >
-      <label className="block">
-        <span className="text-ink text-sm font-medium">SMS provider</span>
-        <SelectBox value={provider} onChange={(e) => setProvider(e.target.value as SmsProvider)} className={fieldClass}>
-          {smsProviders.map((p) => (
-            <option key={p}>{p}</option>
-          ))}
-        </SelectBox>
-      </label>
-      <Text label="Sender ID" value={senderId} onChange={setSenderId} error={!valid && 'Use 3–11 letters or digits.'} />
-      <Actions onCancel={onDone} disabled={!valid} />
-    </form>
-  )
-}
-
-function PushForm({ config, onDone }: { config: ChannelConfig['push']; onDone: () => void }) {
-  const [sound, setSound] = useState(config.sound)
-  const [preview, setPreview] = useState(config.preview)
-
-  return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        setConfig('push', { sound, preview })
-        onDone()
-      }}
-    >
-      <Toggle label="Play a sound" hint="Notifications arrive with the device's alert sound." checked={sound} onChange={setSound} labelClassName="font-medium" />
-      <Toggle label="Show message preview" hint="Include the first line of the message on the lock screen." checked={preview} onChange={setPreview} labelClassName="font-medium" />
-      <Actions onCancel={onDone} />
-    </form>
   )
 }
 
@@ -357,7 +346,17 @@ function Minutes({
   )
 }
 
-function RemindersForm({ reminders, onDone }: { reminders: ReminderRules; onDone: () => void }) {
+function RemindersForm({
+  reminders,
+  onSave,
+  saving,
+  onCancel,
+}: {
+  reminders: ReminderRules
+  onSave: (r: ReminderRules) => void
+  saving: boolean
+  onCancel: () => void
+}) {
   const [draft, setDraft] = useState(reminders)
 
   return (
@@ -365,14 +364,13 @@ function RemindersForm({ reminders, onDone }: { reminders: ReminderRules; onDone
       className="space-y-4 p-4"
       onSubmit={(e) => {
         e.preventDefault()
-        setReminders(draft)
-        onDone()
+        onSave(draft)
       }}
     >
       <Minutes label="Remind the caregiver before the visit" value={draft.caregiverMinutes} options={leadOptions} onChange={(caregiverMinutes) => setDraft({ ...draft, caregiverMinutes })} />
       <Minutes label="Notify the family before the start" value={draft.familyMinutes} options={leadOptions} onChange={(familyMinutes) => setDraft({ ...draft, familyMinutes })} />
       <Minutes label="Alert the coordinator when the caregiver is late by" value={draft.lateMinutes} options={lateOptions} onChange={(lateMinutes) => setDraft({ ...draft, lateMinutes })} />
-      <Actions onCancel={onDone} />
+      <Actions onCancel={onCancel} saving={saving} />
     </form>
   )
 }
@@ -413,8 +411,22 @@ function Checks({
   )
 }
 
-function EmergencyForm({ emergency, onDone }: { emergency: EmergencyAlerts; onDone: () => void }) {
+function EmergencyForm({
+  emergency,
+  availableTriggers,
+  onSave,
+  saving,
+  onCancel,
+}: {
+  emergency: EmergencyAlerts
+  availableTriggers: string[]
+  onSave: (e: EmergencyAlerts) => void
+  saving: boolean
+  onCancel: () => void
+}) {
   const [draft, setDraft] = useState(emergency)
+  // Prefer the backend's trigger catalog; fall back to the static list if empty.
+  const triggers = availableTriggers.length > 0 ? availableTriggers : triggerOptions
   const valid = draft.recipients.length > 0 && draft.channels.length > 0 && draft.triggers.length > 0
 
   return (
@@ -423,14 +435,13 @@ function EmergencyForm({ emergency, onDone }: { emergency: EmergencyAlerts; onDo
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        setEmergency(draft)
-        onDone()
+        onSave(draft)
       }}
     >
       <Checks legend="Recipients" options={recipientOptions} chosen={draft.recipients} onChange={(recipients) => setDraft({ ...draft, recipients })} />
       <Checks legend="Channels" options={channelOptions} chosen={draft.channels} onChange={(channels) => setDraft({ ...draft, channels })} />
-      <Checks legend="Triggers" options={triggerOptions} chosen={draft.triggers} onChange={(triggers) => setDraft({ ...draft, triggers })} />
-      <Actions onCancel={onDone} disabled={!valid} />
+      <Checks legend="Triggers" options={triggers} chosen={draft.triggers} onChange={(next) => setDraft({ ...draft, triggers: next })} />
+      <Actions onCancel={onCancel} disabled={!valid} saving={saving} />
     </form>
   )
 }

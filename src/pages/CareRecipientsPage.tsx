@@ -1,10 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Download, Plus } from 'lucide-react'
-import {
-  PAGE_SIZE,
-  TOTAL_RECIPIENTS,
-  recipients,
-} from '@/features/care-recipients/data'
+import { useState } from 'react'
+import { Download, Loader2, Plus } from 'lucide-react'
 import { SummaryCards } from '@/features/care-recipients/SummaryCards'
 import {
   DirectoryToolbar,
@@ -13,30 +8,17 @@ import {
 import { RecipientTable } from '@/features/care-recipients/RecipientTable'
 import { FooterPanels } from '@/features/care-recipients/FooterPanels'
 import { AddRecipientDrawer } from '@/features/care-recipients/AddRecipientDrawer'
+import { useRecipientList } from '@/features/care-recipients/useRecipientList'
 import { Pagination } from '@/components/ui/Pagination'
-import type { Recipient } from '@/features/care-recipients/data'
 
-const predicates: Record<DirectoryFilter, (r: Recipient) => boolean> = {
-  all: () => true,
-  active: (r) => r.status === 'active',
-  'on-hold': (r) => r.status === 'on-hold',
-  'high-priority': (r) =>
-    r.priority === 'high' ||
-    r.priority === 'urgent' ||
-    r.priority === 'critical',
-  new: (r) => r.status === 'new',
-}
+const PAGE_SIZE = 8
 
-/*
- * Counts come from the server in a real build. Here they're the mockup's
- * headline figures, scaled from the sample page so the pills stay believable.
- */
-const displayCounts: Record<DirectoryFilter, number> = {
-  all: TOTAL_RECIPIENTS,
-  active: 298,
-  'on-hold': 31,
-  'high-priority': 24,
-  new: 12,
+const emptyCounts: Record<DirectoryFilter, number> = {
+  all: 0,
+  active: 0,
+  'on-hold': 0,
+  'high-priority': 0,
+  new: 0,
 }
 
 export function CareRecipientsPage() {
@@ -44,36 +26,12 @@ export function CareRecipientsPage() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [adding, setAdding] = useState(false)
-  // A snapshot of the shared list, replaced when a recipient is added.
-  const [all, setAll] = useState(recipients)
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return all.filter((r) => {
-      if (!predicates[filter](r)) return false
-      if (!q) return true
-      return [r.name, r.ref, r.condition, r.caregiver ?? '']
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
-    })
-  }, [all, filter, query])
-
-  const filtering = filter !== 'all' || query.trim() !== ''
-
-  /*
-   * Paging is driven by the rows actually held, never by TOTAL_RECIPIENTS —
-   * otherwise Next walks to page 43 while the same eight rows stay on screen
-   * and the summary contradicts the table. TOTAL_RECIPIENTS is only the "of N"
-   * framing for the unfiltered view, standing in for a server count.
-   */
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
-  const safePage = Math.min(page, pageCount)
-  const pageRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
-
-  const total = filtering ? rows.length : TOTAL_RECIPIENTS
-  const from = rows.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1
-  const to = (safePage - 1) * PAGE_SIZE + pageRows.length
+  const { data, isPending, isError, error, refetch, isFetching } = useRecipientList({
+    filter,
+    search: query,
+    page,
+  })
 
   const onFilterChange = (next: DirectoryFilter) => {
     setFilter(next)
@@ -84,6 +42,12 @@ export function CareRecipientsPage() {
     setQuery(next)
     setPage(1)
   }
+
+  const total = data?.total ?? 0
+  const pageCount = data?.totalPages ?? 1
+  const shown = data?.rows.length ?? 0
+  const from = shown === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
+  const to = (page - 1) * PAGE_SIZE + shown
 
   return (
     <div className="space-y-6">
@@ -118,42 +82,68 @@ export function CareRecipientsPage() {
 
       <AddRecipientDrawer
         open={adding}
-        onClose={(recipient) => {
+        onClose={(created) => {
           setAdding(false)
-          if (recipient) {
-            // New recipients go to the top; show the first page so it is seen.
-            setAll([...recipients])
+          if (created) {
             setPage(1)
+            void refetch()
           }
         }}
       />
 
-      <SummaryCards />
+      {isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load care recipients.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <>
+          <SummaryCards summaries={data?.summaries ?? []} />
 
-      <section aria-label="Care recipient directory" className="card overflow-hidden">
-        <DirectoryToolbar
-          filter={filter}
-          onFilterChange={onFilterChange}
-          query={query}
-          onQueryChange={onQueryChange}
-          counts={displayCounts}
-        />
+          <section aria-label="Care recipient directory" className="card overflow-hidden">
+            <DirectoryToolbar
+              filter={filter}
+              onFilterChange={onFilterChange}
+              query={query}
+              onQueryChange={onQueryChange}
+              counts={data?.tabCounts ?? emptyCounts}
+            />
 
-        <RecipientTable rows={pageRows} searching={query.trim() !== ''} />
+            {isPending ? (
+              <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+                <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+                Loading care recipients…
+              </div>
+            ) : (
+              <>
+                <RecipientTable rows={data.rows} searching={query.trim() !== ''} />
 
-        <Pagination
-          page={safePage}
-          pageCount={pageCount}
-          onPageChange={setPage}
-          summary={
-            rows.length === 0
-              ? 'No care recipients to show'
-              : `Showing ${from}-${to} of ${total} care recipients`
-          }
-        />
-      </section>
+                <Pagination
+                  page={page}
+                  pageCount={pageCount}
+                  onPageChange={setPage}
+                  summary={
+                    total === 0
+                      ? isFetching
+                        ? 'Loading…'
+                        : 'No care recipients to show'
+                      : `Showing ${from}-${to} of ${total} care recipients`
+                  }
+                />
+              </>
+            )}
+          </section>
 
-      <FooterPanels />
+          <FooterPanels triggers={data?.triggers ?? []} />
+        </>
+      )}
     </div>
   )
 }

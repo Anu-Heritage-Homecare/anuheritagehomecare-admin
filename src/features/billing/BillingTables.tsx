@@ -477,7 +477,7 @@ export function TransactionLog({
                     </th>
                     <td className="text-ink-muted px-4 py-3 whitespace-nowrap">{t.client}</td>
                     <td className="text-ink px-4 py-3 font-medium whitespace-nowrap tabular-nums">
-                      {formatMoney(t.amount)}
+                      {formatMoney(t.amount, 'NGN')}
                     </td>
                     <td className="text-ink-muted px-4 py-3 whitespace-nowrap">{t.method}</td>
                     <td className="px-4 py-3">
@@ -515,7 +515,7 @@ export function TransactionLog({
                   </span>
                 </div>
                 <p className="text-ink mt-2 text-sm font-semibold tabular-nums">
-                  {formatMoney(t.amount)}
+                  {formatMoney(t.amount, 'NGN')}
                   <span className="text-ink-subtle ml-2 font-normal">
                     {formatDate(t.at)}
                   </span>
@@ -575,7 +575,7 @@ export function RenewalsTimeline({
                           {s.client}
                         </p>
                         <p className="text-ink shrink-0 text-sm font-semibold tabular-nums">
-                          {formatMoney(renewalAmount(s))}
+                          {formatMoney(renewalAmount(s), 'NGN')}
                         </p>
                       </div>
                       <p className="text-ink-subtle mt-0.5 text-xs break-words">
@@ -668,7 +668,7 @@ export function PlanPerformance({
             <dl className="mt-3 space-y-2 text-sm">
               {[
                 ['Subscribers', plan.subscribers.toLocaleString()],
-                ['Monthly revenue', formatMoney(plan.revenue)],
+                ['Monthly revenue', formatMoney(plan.revenue, 'NGN')],
                 ['Included hours', plan.hours],
                 ['Renewal rate', `${plan.renewalRate}%`],
               ].map(([label, value]) => (

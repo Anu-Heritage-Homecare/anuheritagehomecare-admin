@@ -1,14 +1,15 @@
 /**
  * Security settings — the password policy, multi-factor rules, session limits
- * and the recent sign-in history.
+ * and the recent sign-in history, read from and written to the back office.
  *
- * Content follows the Figma settings-security-integrations screen as drawn.
- * The app has no sign-in of its own, so nothing here is enforced: these record
- * the policy, and the login history is the design's five rows.
- *
- * Held in memory for the session, like every other settings store in the app.
+ * One read (`GET /admin/security`) powers the whole Security tab; the three
+ * Edit actions PATCH their own section. The recent logins the screen shows come
+ * from that same read; the paginated full history (`/admin/security/login-history`)
+ * and the audit logs (`/admin/security/audit-logs`) are available on the backend
+ * but the page renders no full-history or audit section, so they are not wired.
  */
-import { useSyncExternalStore } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 
 export interface PasswordPolicy {
   minLength: number
@@ -46,68 +47,172 @@ export interface LoginRecord {
   success: boolean
 }
 
-interface SecuritySettings {
+export interface SecuritySettings {
   password: PasswordPolicy
   mfa: MfaSettings
   session: SessionSettings
   logins: LoginRecord[]
 }
 
-const state: SecuritySettings = {
-  password: {
-    minLength: 8,
-    uppercase: true,
-    numbers: true,
-    special: true,
-    expiryDays: 90,
-    blockedPrevious: 5,
-  },
-  mfa: {
-    status: 'Enabled for all admins',
-    methods: ['Authenticator App', 'SMS'],
-    roles: ['Administrator', 'Coordinator', 'Finance Managers'],
-  },
-  session: { timeoutMinutes: 30, maxConcurrent: 3, rememberDays: 30 },
-  logins: [
-    { at: '2026-03-31 10:45', operator: 'Sarah Jenkins', ip: '192.168.1.42', device: 'Chrome / macOS', success: true },
-    { at: '2026-03-31 09:12', operator: 'John Carter (Coordinator)', ip: '102.89.34.12', device: 'Safari / iOS', success: true },
-    { at: '2026-03-31 08:30', operator: 'Finance Admin', ip: '197.210.64.1', device: 'Firefox / Windows', success: true },
-    { at: '2026-03-30 18:22', operator: 'Sarah Jenkins', ip: '192.168.1.42', device: 'Chrome / macOS', success: true },
-    { at: '2026-03-30 14:15', operator: 'Unknown Account', ip: '45.12.89.90', device: 'Unknown / Android', success: false },
-  ],
+/* --------------------------- backend response ----------------------------- */
+
+interface PasswordPolicyDto {
+  minLength: number
+  requireUppercase: boolean
+  requireNumber: boolean
+  requireSpecialChar: boolean
+  expiryDays: number
+  historyBlocked: number
 }
 
-let revision = 0
-const listeners = new Set<() => void>()
+type MfaEnforcement = 'ENABLED_FOR_ALL' | 'OPTIONAL' | 'DISABLED'
+type MfaMethod = 'AUTHENTICATOR' | 'SMS' | 'EMAIL'
+type LoginEventOutcome = 'SUCCESS' | 'FAILED'
 
-function emit(): void {
-  revision += 1
-  for (const l of listeners) l()
+interface MfaConfigDto {
+  enforcement: MfaEnforcement
+  methods: MfaMethod[]
+  enforcedRoles: string[]
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+interface SessionSettingsDto {
+  timeoutMinutes: number
+  maxConcurrentSessions: number
+  rememberDeviceDays: number
 }
 
-export function useSecuritySettings(): SecuritySettings {
-  useSyncExternalStore(subscribe, () => revision, () => revision)
-  return state
+interface LoginHistoryEntryDto {
+  id: string
+  email: string
+  operatorName: string | null
+  outcome: LoginEventOutcome
+  ipAddress: string | null
+  deviceLabel: string | null
+  at: string
 }
 
-export function setPasswordPolicy(password: PasswordPolicy): void {
-  state.password = password
-  emit()
+interface SecurityScreenDto {
+  passwordPolicy: PasswordPolicyDto
+  mfa: MfaConfigDto
+  session: SessionSettingsDto
+  recentLogins: LoginHistoryEntryDto[]
 }
 
-export function setMfa(mfa: MfaSettings): void {
-  state.mfa = mfa
-  emit()
+/* -------------------------------- enum maps -------------------------------- */
+
+// The backend enforcement enum has no "users vs admins" split; the back office
+// mandate is admin wide. "Enabled for all users" has no backend value, so it is
+// not offered by the live mapping — ENABLED_FOR_ALL reads as the admins label.
+const ENFORCEMENT_TO_STATUS: Record<MfaEnforcement, MfaStatus> = {
+  ENABLED_FOR_ALL: 'Enabled for all admins',
+  OPTIONAL: 'Disabled',
+  DISABLED: 'Disabled',
 }
 
-export function setSession(session: SessionSettings): void {
-  state.session = session
-  emit()
+function statusToEnforcement(status: MfaStatus): MfaEnforcement {
+  return status === 'Disabled' ? 'DISABLED' : 'ENABLED_FOR_ALL'
+}
+
+const METHOD_TO_LABEL: Record<MfaMethod, string> = {
+  AUTHENTICATOR: 'Authenticator App',
+  SMS: 'SMS',
+  EMAIL: 'Email',
+}
+
+const LABEL_TO_METHOD: Record<string, MfaMethod> = {
+  'Authenticator App': 'AUTHENTICATOR',
+  SMS: 'SMS',
+  Email: 'EMAIL',
+}
+
+/* -------------------------------- helpers --------------------------------- */
+
+/** An ISO timestamp to the "YYYY-MM-DD HH:MM" the login table shows. */
+function formatStamp(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function toView(dto: SecurityScreenDto): SecuritySettings {
+  return {
+    password: {
+      minLength: dto.passwordPolicy.minLength,
+      uppercase: dto.passwordPolicy.requireUppercase,
+      numbers: dto.passwordPolicy.requireNumber,
+      special: dto.passwordPolicy.requireSpecialChar,
+      expiryDays: dto.passwordPolicy.expiryDays,
+      blockedPrevious: dto.passwordPolicy.historyBlocked,
+    },
+    mfa: {
+      status: ENFORCEMENT_TO_STATUS[dto.mfa.enforcement],
+      methods: dto.mfa.methods.map((m) => METHOD_TO_LABEL[m]),
+      roles: dto.mfa.enforcedRoles,
+    },
+    session: {
+      timeoutMinutes: dto.session.timeoutMinutes,
+      maxConcurrent: dto.session.maxConcurrentSessions,
+      rememberDays: dto.session.rememberDeviceDays,
+    },
+    logins: dto.recentLogins.map((l) => ({
+      at: formatStamp(l.at),
+      operator: l.operatorName ?? l.email,
+      ip: l.ipAddress ?? '—',
+      device: l.deviceLabel ?? '—',
+      success: l.outcome === 'SUCCESS',
+    })),
+  }
+}
+
+const SECURITY_KEY = ['admin', 'security'] as const
+
+export function useSecuritySettings() {
+  return useQuery({
+    queryKey: SECURITY_KEY,
+    queryFn: async () => toView(await api.get<SecurityScreenDto>('/admin/security')),
+  })
+}
+
+/** The three Edit actions, each PATCHing its own section then refreshing. */
+export function useSecurityMutations() {
+  const queryClient = useQueryClient()
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: SECURITY_KEY })
+
+  const setPasswordPolicy = useMutation({
+    mutationFn: (p: PasswordPolicy) =>
+      api.patch('/admin/security/password-policy', {
+        passwordMinLength: p.minLength,
+        requireUppercase: p.uppercase,
+        requireNumber: p.numbers,
+        requireSpecialChar: p.special,
+        passwordExpiryDays: p.expiryDays,
+        passwordHistoryBlocked: p.blockedPrevious,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const setMfa = useMutation({
+    mutationFn: (m: MfaSettings) =>
+      api.patch('/admin/security/mfa', {
+        enforcement: statusToEnforcement(m.status),
+        methods: m.methods.map((label) => LABEL_TO_METHOD[label]),
+        enforcedRoles: m.roles,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const setSession = useMutation({
+    mutationFn: (s: SessionSettings) =>
+      api.patch('/admin/security/session', {
+        sessionTimeoutMinutes: s.timeoutMinutes,
+        maxConcurrentSessions: s.maxConcurrent,
+        rememberDeviceDays: s.rememberDays,
+      }),
+    onSuccess: invalidate,
+  })
+
+  return { setPasswordPolicy, setMfa, setSession }
 }
 
 export function parseWhole(raw: string, min: number, max: number): number | null {

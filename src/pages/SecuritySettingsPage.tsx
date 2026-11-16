@@ -1,36 +1,40 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarDays, Check, Construction, Copy, KeyRound, Settings, SquarePen } from 'lucide-react'
+import {
+  CalendarDays,
+  Check,
+  Construction,
+  Copy,
+  KeyRound,
+  Loader2,
+  Plus,
+  Settings,
+  SquarePen,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
   mfaMethodOptions,
   mfaRoleOptions,
   mfaStatuses,
   parseWhole,
-  setMfa,
-  setPasswordPolicy,
-  setSession,
+  useSecurityMutations,
   useSecuritySettings,
 } from '@/features/settings/security'
 import type { MfaSettings, MfaStatus, PasswordPolicy, SessionSettings } from '@/features/settings/security'
 import {
-  connect,
-  disconnect,
   formatInterval,
   fullKey,
   maskedKey,
-  regenerateKey,
-  revokeKey,
-  saveConfig,
   syncDirections,
   syncEventOptions,
   syncIntervals,
   targetCalendars,
-  testConnection,
+  useApiKeyMutations,
   useApiKeys,
+  useIntegrationMutations,
   useIntegrations,
 } from '@/features/settings/integrations'
-import type { ApiKey, Integration } from '@/features/settings/integrations'
+import type { ApiKey, Integration, IntegrationConfig } from '@/features/settings/integrations'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
 import { cn } from '@/lib/cn'
@@ -106,19 +110,33 @@ function YesNo({ value }: { value: boolean }) {
 const stackedLabel = 'text-ink-subtle text-[0.6875rem] font-medium tracking-wide uppercase'
 
 export function SecuritySettingsPage() {
-  const s = useSecuritySettings()
+  const security = useSecuritySettings()
+  const integrationsQuery = useIntegrations()
+  const apiKeysQuery = useApiKeys()
   const [params, setParams] = useSearchParams()
   const tab: TabId = tabs.find((t) => t.id === params.get('tab'))?.id ?? 'security'
   const goTo = (id: TabId) => setParams(id === 'security' ? {} : { tab: id }, { replace: true })
-  const integrations = useIntegrations()
   const [configuringId, setConfiguringId] = useState<string | null>(null)
-  const configuring = integrations.find((i) => i.id === configuringId)
-  const apiKeys = useApiKeys()
   const [viewingKeyId, setViewingKeyId] = useState<string | null>(null)
-  const viewingKey = apiKeys.find((k) => k.id === viewingKeyId)
+  const [creating, setCreating] = useState(false)
   const [dialog, setDialog] = useState<Dialog>(null)
   const close = () => setDialog(null)
-  const mfaOn = s.mfa.status !== 'Disabled'
+
+  const isPending = security.isPending || integrationsQuery.isPending || apiKeysQuery.isPending
+  const isError = security.isError || integrationsQuery.isError || apiKeysQuery.isError
+  const error = security.error ?? integrationsQuery.error ?? apiKeysQuery.error
+  const retry = () => {
+    void security.refetch()
+    void integrationsQuery.refetch()
+    void apiKeysQuery.refetch()
+  }
+
+  const s = security.data
+  const integrations = integrationsQuery.data ?? []
+  const apiKeys = apiKeysQuery.data ?? []
+  const configuring = integrations.find((i) => i.id === configuringId)
+  const viewingKey = apiKeys.find((k) => k.id === viewingKeyId)
+  const mfaOn = s ? s.mfa.status !== 'Disabled' : false
 
   return (
     <div className="space-y-5">
@@ -148,7 +166,24 @@ export function SecuritySettingsPage() {
         ))}
       </nav>
 
-      {tab === 'security' ? (
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading security settings…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load security settings.</p>
+          <p className="text-ink-subtle text-sm">{error?.message}</p>
+          <button
+            type="button"
+            onClick={retry}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : tab === 'security' && s ? (
         <>
           <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
             <Card title="Password Policy" action={<CardButton label="Edit Policy" icon={SquarePen} onClick={() => setDialog('password')} />}>
@@ -240,8 +275,15 @@ export function SecuritySettingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-line divide-y">
-                  {s.logins.map((l) => (
-                    <tr key={`${l.at}-${l.ip}`}>
+                  {s.logins.length === 0 && (
+                    <tr>
+                      <td className={cn(td, 'text-ink-muted')} colSpan={5}>
+                        No recent sign-ins.
+                      </td>
+                    </tr>
+                  )}
+                  {s.logins.map((l, index) => (
+                    <tr key={`${l.at}-${l.ip}-${index}`}>
                       <td className={cn(td, 'text-ink-muted')}>{l.at}</td>
                       <th scope="row" className={cn(td, 'text-ink font-semibold')}>{l.operator}</th>
                       <td className={cn(td, 'text-ink-muted')}>{l.ip}</td>
@@ -295,7 +337,10 @@ export function SecuritySettingsPage() {
         </ul>
 
         <section aria-labelledby="api-keys-heading">
-          <h2 id="api-keys-heading" className="text-ink mb-3 text-base font-semibold tracking-tight">API Keys</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 id="api-keys-heading" className="text-ink text-base font-semibold tracking-tight">API Keys</h2>
+            <CardButton label="Create Key" icon={Plus} onClick={() => setCreating(true)} />
+          </div>
           <ul className="space-y-3">
             {apiKeys.map((k) => (
               <li key={k.id} className="card flex flex-wrap items-center gap-4 p-4">
@@ -338,15 +383,22 @@ export function SecuritySettingsPage() {
       <Drawer open={Boolean(viewingKey)} onClose={() => setViewingKeyId(null)} title="API Key Details">
         {viewingKey && <ApiKeyDetails apiKey={viewingKey} onClose={() => setViewingKeyId(null)} />}
       </Drawer>
-      <Drawer open={dialog === 'password'} onClose={close} title="Edit password policy" placement="center">
-        <PasswordForm policy={s.password} onDone={close} />
+      <Drawer open={creating} onClose={() => setCreating(false)} title="Create API Key">
+        {creating && <CreateKeyForm onDone={() => setCreating(false)} />}
       </Drawer>
-      <Drawer open={dialog === 'mfa'} onClose={close} title="Edit multi-factor authentication" placement="center">
-        <MfaForm mfa={s.mfa} onDone={close} />
-      </Drawer>
-      <Drawer open={dialog === 'session'} onClose={close} title="Session config" placement="center">
-        <SessionForm session={s.session} onDone={close} />
-      </Drawer>
+      {s && (
+        <>
+          <Drawer open={dialog === 'password'} onClose={close} title="Edit password policy" placement="center">
+            <PasswordForm policy={s.password} onDone={close} />
+          </Drawer>
+          <Drawer open={dialog === 'mfa'} onClose={close} title="Edit multi-factor authentication" placement="center">
+            <MfaForm mfa={s.mfa} onDone={close} />
+          </Drawer>
+          <Drawer open={dialog === 'session'} onClose={close} title="Session config" placement="center">
+            <SessionForm session={s.session} onDone={close} />
+          </Drawer>
+        </>
+      )}
     </div>
   )
 }
@@ -364,12 +416,136 @@ function KeyStatus({ status }: { status: ApiKey['status'] }) {
   )
 }
 
+/** Shows a one-time plaintext secret with a copy button; the backend reveals it once. */
+function SecretReveal({ secret }: { secret: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(secret)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p className="text-sm font-medium text-amber-800">
+        Copy this secret now. It is shown once and cannot be retrieved again.
+      </p>
+      <div className="border-line bg-surface mt-2 flex items-center gap-2 rounded-lg border py-1.5 pr-1.5 pl-3">
+        <code className="text-ink min-w-0 flex-1 truncate font-mono text-xs">{secret}</code>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={copied ? 'Copied' : 'Copy secret'}
+          className="border-line bg-surface text-ink hover:bg-canvas grid size-7 shrink-0 place-items-center rounded-md border"
+        >
+          {copied ? (
+            <Check className="size-3.5 text-emerald-600" strokeWidth={2.4} aria-hidden="true" />
+          ) : (
+            <Copy className="size-3.5" strokeWidth={2} aria-hidden="true" />
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CreateKeyForm({ onDone }: { onDone: () => void }) {
+  const { create } = useApiKeyMutations()
+  const [name, setName] = useState('')
+  const [scopes, setScopes] = useState('')
+  const [rate, setRate] = useState('1000')
+  const secret = create.data?.secret
+  const limit = parseWhole(rate, 1, 1_000_000)
+  const scopeList = scopes.split(',').map((x) => x.trim()).filter(Boolean)
+  const valid = name.trim().length > 0 && scopeList.length > 0 && limit !== null
+  const label = 'text-ink text-sm font-medium'
+
+  if (secret) {
+    return (
+      <div className="flex min-h-full flex-col">
+        <div className="flex-1 space-y-4 p-5">
+          <SecretReveal secret={secret} />
+          <p className="text-ink-muted text-sm">The key “{create.data?.key.name}” is active.</p>
+        </div>
+        <div className="border-line bg-surface sticky bottom-0 flex justify-end border-t p-5">
+          <button
+            type="button"
+            onClick={onDone}
+            className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      className="flex min-h-full flex-col"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid || limit === null) return
+        create.mutate({ name: name.trim(), scopes: scopeList, rateLimitPerHour: limit })
+      }}
+    >
+      <div className="flex-1 space-y-4 p-5">
+        <label className="block">
+          <span className={label}>Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={fieldClass} />
+        </label>
+        <label className="block">
+          <span className={label}>Scopes</span>
+          <input
+            value={scopes}
+            onChange={(e) => setScopes(e.target.value)}
+            placeholder="read_recipients, read_schedules"
+            className={fieldClass}
+          />
+          <span className="text-ink-subtle mt-1 block text-xs">Comma separated.</span>
+        </label>
+        <NumberField
+          label="Rate limit"
+          value={rate}
+          onChange={setRate}
+          suffix="requests / hour"
+          error={limit === null && 'Enter 1 to 1,000,000.'}
+        />
+        {create.isError && (
+          <p role="alert" className="text-sm text-red-700">{create.error.message}</p>
+        )}
+      </div>
+      <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
+        <button
+          type="button"
+          onClick={onDone}
+          className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={!valid || create.isPending}
+          className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
+        >
+          {create.isPending ? 'Creating…' : 'Create Key'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 function ApiKeyDetails({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void }) {
+  const { regenerate, revoke } = useApiKeyMutations()
   const [copied, setCopied] = useState(false)
   /* Both are one-way, so each asks once before it happens. */
   const [confirming, setConfirming] = useState<'regenerate' | 'revoke' | null>(null)
   const active = apiKey.status === 'Active'
   const heading = 'text-ink text-sm font-semibold'
+  const revealed = regenerate.data?.key.id === apiKey.id ? regenerate.data.secret : undefined
   const meta: [string, string][] = [
     ['Created:', apiKey.created],
     ['Created by:', apiKey.createdBy],
@@ -406,6 +582,8 @@ function ApiKeyDetails({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => voi
             ))}
           </dl>
         </div>
+
+        {revealed && <SecretReveal secret={revealed} />}
 
         <div>
           <h3 className={heading}>API Key Value</h3>
@@ -473,12 +651,13 @@ function ApiKeyDetails({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => voi
               </button>
               <button
                 type="button"
+                disabled={regenerate.isPending || revoke.isPending}
                 onClick={() => {
-                  if (confirming === 'regenerate') regenerateKey(apiKey.id)
-                  else revokeKey(apiKey.id)
+                  if (confirming === 'regenerate') regenerate.mutate(apiKey.id)
+                  else revoke.mutate(apiKey.id)
                   setConfirming(null)
                 }}
-                className="inline-flex h-8 items-center rounded-lg bg-red-600 px-3 text-sm font-semibold text-white hover:bg-red-700"
+                className="inline-flex h-8 items-center rounded-lg bg-red-600 px-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {confirming === 'regenerate' ? 'Regenerate' : 'Revoke'}
               </button>
@@ -536,10 +715,11 @@ function IntegrationTile() {
 }
 
 function IntegrationForm({ integration, onDone }: { integration: Integration; onDone: () => void }) {
-  const [draft, setDraft] = useState(integration.config)
-  const [tested, setTested] = useState(false)
+  const { saveConfig, setConnected, testConnection } = useIntegrationMutations()
+  const [draft, setDraft] = useState<IntegrationConfig>(integration.config)
   const on = integration.connected
   const valid = draft.events.length > 0
+  const testResult = testConnection.data
   const label = 'text-ink text-sm font-semibold'
   const secondary =
     'bg-surface inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-medium transition-colors'
@@ -550,8 +730,7 @@ function IntegrationForm({ integration, onDone }: { integration: Integration; on
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        saveConfig(integration.id, draft)
-        onDone()
+        saveConfig.mutate({ id: integration.id, config: draft }, { onSuccess: onDone })
       }}
     >
       <div className="flex-1 space-y-4 p-5">
@@ -636,39 +815,40 @@ function IntegrationForm({ integration, onDone }: { integration: Integration; on
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            disabled={!on}
-            onClick={() => {
-              testConnection(integration.id)
-              setTested(true)
-            }}
+            disabled={!on || testConnection.isPending}
+            onClick={() => testConnection.mutate(integration.id)}
             className={cn(secondary, 'border-control text-ink hover:bg-sunken disabled:opacity-50')}
           >
-            Test Connection
+            {testConnection.isPending ? 'Testing…' : 'Test Connection'}
           </button>
           {on ? (
             <button
               type="button"
-              onClick={() => {
-                disconnect(integration.id)
-                setTested(false)
-              }}
-              className={cn(secondary, 'border-red-200 text-red-600 hover:bg-red-50')}
+              disabled={setConnected.isPending}
+              onClick={() => setConnected.mutate({ id: integration.id, connected: false })}
+              className={cn(secondary, 'border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50')}
             >
               Disconnect
             </button>
           ) : (
             <button
               type="button"
-              onClick={() => connect(integration.id)}
-              className={cn(secondary, 'border-brand-200 text-brand-700 hover:bg-brand-50')}
+              disabled={setConnected.isPending}
+              onClick={() => setConnected.mutate({ id: integration.id, connected: true })}
+              className={cn(secondary, 'border-brand-200 text-brand-700 hover:bg-brand-50 disabled:opacity-50')}
             >
               Connect
             </button>
           )}
         </div>
-        <p role="status" className="text-xs font-medium text-emerald-700">
-          {tested && on ? 'Connection test passed.' : ''}
-        </p>
+        {testResult && (
+          <p
+            role="status"
+            className={cn('text-xs font-medium', testResult.ok ? 'text-emerald-700' : 'text-red-700')}
+          >
+            {testResult.message}
+          </p>
+        )}
       </div>
       <div className="border-line bg-surface sticky bottom-0 flex items-center justify-between gap-2 border-t p-5">
         <button
@@ -680,10 +860,10 @@ function IntegrationForm({ integration, onDone }: { integration: Integration; on
         </button>
         <button
           type="submit"
-          disabled={!on || !valid}
+          disabled={!on || !valid || saveConfig.isPending}
           className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white"
         >
-          Save Configuration
+          {saveConfig.isPending ? 'Saving…' : 'Save Configuration'}
         </button>
       </div>
     </form>
@@ -746,6 +926,7 @@ function Actions({ onCancel, disabled = false }: { onCancel: () => void; disable
 }
 
 function PasswordForm({ policy, onDone }: { policy: PasswordPolicy; onDone: () => void }) {
+  const { setPasswordPolicy } = useSecurityMutations()
   const [minLength, setMinLength] = useState(String(policy.minLength))
   const [expiry, setExpiry] = useState(String(policy.expiryDays))
   const [blocked, setBlocked] = useState(String(policy.blockedPrevious))
@@ -761,8 +942,10 @@ function PasswordForm({ policy, onDone }: { policy: PasswordPolicy; onDone: () =
       onSubmit={(e) => {
         e.preventDefault()
         if (min === null || exp === null || blk === null) return
-        setPasswordPolicy({ ...flags, minLength: min, expiryDays: exp, blockedPrevious: blk })
-        onDone()
+        setPasswordPolicy.mutate(
+          { ...flags, minLength: min, expiryDays: exp, blockedPrevious: blk },
+          { onSuccess: onDone },
+        )
       }}
     >
       <NumberField label="Minimum length" value={minLength} onChange={setMinLength} suffix="characters" error={min === null && 'Enter a length from 6 to 64.'} />
@@ -771,7 +954,7 @@ function PasswordForm({ policy, onDone }: { policy: PasswordPolicy; onDone: () =
       <Toggle label="Require special character" checked={flags.special} onChange={(special) => setFlags({ ...flags, special })} labelClassName="font-medium" />
       <NumberField label="Password expiry window" value={expiry} onChange={setExpiry} suffix="days" error={exp === null && 'Enter 0 to 365 days; 0 means never.'} />
       <NumberField label="Previous passwords blocked" value={blocked} onChange={setBlocked} suffix="passwords" error={blk === null && 'Enter a number from 0 to 24.'} />
-      <Actions onCancel={onDone} disabled={!valid} />
+      <Actions onCancel={onDone} disabled={!valid || setPasswordPolicy.isPending} />
     </form>
   )
 }
@@ -812,6 +995,7 @@ function Checks({
 }
 
 function MfaForm({ mfa, onDone }: { mfa: MfaSettings; onDone: () => void }) {
+  const { setMfa } = useSecurityMutations()
   const [draft, setDraft] = useState(mfa)
   const on = draft.status !== 'Disabled'
   const valid = !on || (draft.methods.length > 0 && draft.roles.length > 0)
@@ -822,8 +1006,7 @@ function MfaForm({ mfa, onDone }: { mfa: MfaSettings; onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        setMfa(draft)
-        onDone()
+        setMfa.mutate(draft, { onSuccess: onDone })
       }}
     >
       <label className="block">
@@ -843,12 +1026,13 @@ function MfaForm({ mfa, onDone }: { mfa: MfaSettings; onDone: () => void }) {
         <p className="text-ink-subtle mt-1.5 text-xs">The first method ticked is the primary; the rest are backups.</p>
       </div>
       <Checks legend="Enforce for roles" options={mfaRoleOptions} chosen={draft.roles} onChange={(roles) => setDraft({ ...draft, roles })} required={on} />
-      <Actions onCancel={onDone} disabled={!valid} />
+      <Actions onCancel={onDone} disabled={!valid || setMfa.isPending} />
     </form>
   )
 }
 
 function SessionForm({ session, onDone }: { session: SessionSettings; onDone: () => void }) {
+  const { setSession } = useSecurityMutations()
   const [timeout, setTimeoutText] = useState(String(session.timeoutMinutes))
   const [max, setMax] = useState(String(session.maxConcurrent))
   const [remember, setRemember] = useState(String(session.rememberDays))
@@ -863,14 +1047,13 @@ function SessionForm({ session, onDone }: { session: SessionSettings; onDone: ()
       onSubmit={(e) => {
         e.preventDefault()
         if (t === null || m === null || r === null) return
-        setSession({ timeoutMinutes: t, maxConcurrent: m, rememberDays: r })
-        onDone()
+        setSession.mutate({ timeoutMinutes: t, maxConcurrent: m, rememberDays: r }, { onSuccess: onDone })
       }}
     >
       <NumberField label="Session timeout" value={timeout} onChange={setTimeoutText} suffix="minutes idle" error={t === null && 'Enter 5 to 480 minutes.'} />
       <NumberField label="Max concurrent sessions" value={max} onChange={setMax} suffix="per user" error={m === null && 'Enter a number from 1 to 10.'} />
       <NumberField label="Remember device window" value={remember} onChange={setRemember} suffix="days" error={r === null && 'Enter 1 to 90 days.'} />
-      <Actions onCancel={onDone} disabled={!valid} />
+      <Actions onCancel={onDone} disabled={!valid || setSession.isPending} />
     </form>
   )
 }

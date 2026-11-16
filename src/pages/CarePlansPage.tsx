@@ -1,15 +1,11 @@
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { Archive, Plus } from 'lucide-react'
+import { Archive, Loader2, Plus } from 'lucide-react'
 import {
-  formatMoney,
   planById,
-  planRevenue,
   plans,
-  totalSubscribers,
 } from '@/features/billing/data'
 import {
   archivedPlanCount,
-  getPlanDetail,
   isPlanId,
 } from '@/features/billing/plan-catalogue'
 import {
@@ -23,8 +19,8 @@ import {
   RenewalRulesTab,
   ServicesTab,
 } from '@/features/billing/PlanTabs'
+import { useCarePlans } from '@/features/billing/useCarePlans'
 import { Panel } from '@/components/ui/Panel'
-import { toneText } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
 const tabs = [
@@ -48,18 +44,23 @@ function isTab(value: string | undefined): value is TabSlug {
 export function CarePlansPage() {
   const { planId, tab } = useParams()
 
+  // The catalogue cards render live for one market (USD, the backend default).
+  const { data, isPending, isError, error, refetch } = useCarePlans('USD', false)
+
   /*
    * The catalogue always has a plan open — the nine detail tabs below the cards
    * have nothing to render otherwise — so a missing or unknown slug resolves to
    * the first plan rather than bouncing back to a path that would match here
-   * again and render nothing at all.
+   * again and render nothing at all. The detail panel is keyed by the local
+   * plan slug; see the scope note on the hook.
    */
   if (!isPlanId(planId))
     return <Navigate to={`/billing/plans/${plans[0].id}/general`} replace />
   if (!isTab(tab)) return <Navigate to={`/billing/plans/${planId}/general`} replace />
 
   const plan = planById[planId]
-  const base = totalSubscribers()
+  const livePlans = data?.plans ?? []
+  const liveSubscribers = livePlans.reduce((sum, p) => sum + p.subscribers, 0)
 
   return (
     <div className="space-y-6">
@@ -99,50 +100,54 @@ export function CarePlansPage() {
           Active care plan catalogue
         </h2>
 
-        <ul className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-4">
-          {plans.map((p) => {
-            const selected = p.id === planId
-            return (
-              <li key={p.id}>
-                {/* The whole card is the control, so the selection target is
-                    the whole card and not a link buried at the bottom of it. */}
-                <Link
-                  to={`/billing/plans/${p.id}/${tab}`}
-                  aria-label={`Open ${p.name}`}
-                  aria-current={selected ? 'true' : undefined}
-                  className={cn(
-                    'card block h-full p-4 transition-colors',
-                    selected
-                      ? 'border-brand-400 ring-brand-200 ring-2'
-                      : 'hover:border-brand-300 hover:bg-brand-50/30',
-                  )}
-                >
+        {isPending ? (
+          <div className="text-ink-subtle flex items-center justify-center gap-2 py-16 text-sm">
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+            Loading the care plan catalogue…
+          </div>
+        ) : isError ? (
+          <div className="card flex flex-col items-center gap-3 p-10 text-center">
+            <p className="text-ink text-sm font-medium">Could not load the catalogue.</p>
+            <p className="text-ink-subtle text-sm">{error.message}</p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (
+          <>
+            <ul className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-4">
+              {livePlans.map((p) => (
+                <li key={p.id} className="card h-full p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-ink flex min-w-0 items-center gap-2 text-sm font-semibold">
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          'size-2.5 shrink-0 rounded-sm bg-current',
-                          toneText[p.tone],
-                        )}
-                      />
+                    <h3 className="text-ink min-w-0 text-sm font-semibold">
                       <span className="min-w-0 break-words">{p.name}</span>
                     </h3>
-                    <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                      Active
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold',
+                        p.isActive
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-slate-100 text-slate-600',
+                      )}
+                    >
+                      {p.isActive ? 'Active' : 'Archived'}
                     </span>
                   </div>
 
                   <p className="text-ink-subtle mt-2 line-clamp-3 text-xs break-words">
-                    {getPlanDetail(p.id).summary}
+                    {p.description}
                   </p>
 
                   <dl className="mt-3 space-y-1.5 text-sm">
                     {[
-                      ['Monthly price', formatMoney(p.monthlyPrice)],
+                      ['Monthly price', p.monthlyPriceLabel],
                       ['Subscribers', p.subscribers.toLocaleString()],
-                      ['Renewal rate', `${p.renewalRate}%`],
-                      ['Monthly revenue', formatMoney(planRevenue(p))],
+                      ['Retention', p.retentionPercent === null ? '—' : `${p.retentionPercent}%`],
+                      ['Est. monthly revenue', p.estRevenueLabel],
                     ].map(([label, value]) => (
                       <div key={label} className="flex flex-wrap justify-between gap-x-3">
                         <dt className="text-ink-muted shrink-0">{label}</dt>
@@ -152,26 +157,16 @@ export function CarePlansPage() {
                       </div>
                     ))}
                   </dl>
-                </Link>
+                </li>
+              ))}
+            </ul>
 
-                {/* Outside the card link: a nested anchor is invalid, and this
-                    one leaves the catalogue entirely. */}
-                <Link
-                  to={`/billing/subscriptions?plan=${p.id}`}
-                  className="text-brand-700 hover:text-brand-800 mt-2 inline-flex min-h-11 items-center text-sm font-medium"
-                >
-                  View tracked subscriptions
-                  <span className="sr-only"> on {p.name}</span>
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
-
-        <p className="text-ink-subtle mt-3 text-xs">
-          {base.toLocaleString()} active subscriptions across{' '}
-          {plans.length} plans, generating {formatMoney(plans.reduce((sum, p) => sum + planRevenue(p), 0))} a month.
-        </p>
+            <p className="text-ink-subtle mt-3 text-xs">
+              {liveSubscribers.toLocaleString()} subscriptions across {livePlans.length} plans in
+              this market.
+            </p>
+          </>
+        )}
       </section>
 
       <Panel title={plan.name} flush>

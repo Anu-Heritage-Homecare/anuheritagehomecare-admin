@@ -5,6 +5,7 @@ import {
   Clock,
   FileText,
   FolderOpen,
+  Loader2,
   Search,
   TriangleAlert,
 } from 'lucide-react'
@@ -18,7 +19,6 @@ import {
   documentStatusLabels,
   effectiveStatus,
   formatUploadDate,
-  getDocuments,
   lastUpload,
   presentStatuses,
   sortDocuments,
@@ -26,6 +26,7 @@ import {
   type DocumentSort,
   type DocumentStatus,
 } from '../documents-data'
+import { useRecipientDocuments } from '../useRecipientDocuments'
 import { DocumentTable } from './DocumentTable'
 import { DocumentActivity } from './DocumentActivity'
 import { Pagination } from '@/components/ui/Pagination'
@@ -39,7 +40,8 @@ type StatusFilter = DocumentStatus | 'all'
 
 export function DocumentsTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const documents = useMemo(() => getDocuments(profile.id), [profile.id])
+  const { data, isPending, isError, error, refetch } = useRecipientDocuments(profile.id)
+  const documents = useMemo(() => data ?? [], [data])
 
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [status, setStatus] = useState<StatusFilter>('all')
@@ -89,6 +91,31 @@ export function DocumentsTab() {
         : beforeCategory.filter((d) => d.category === category)
     return sortDocuments(filtered, sort)
   }, [beforeCategory, category, sort])
+
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading documents…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load documents</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   if (documents.length === 0) {
     return (

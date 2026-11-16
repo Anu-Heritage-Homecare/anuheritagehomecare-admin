@@ -2,13 +2,9 @@ import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import {
-  ChevronRight,
   CircleCheck,
   Clock,
-  Copy,
-  Download,
   FolderOpen,
-  LayoutTemplate,
   Plus,
   Search,
   ShieldAlert,
@@ -17,182 +13,108 @@ import {
   Users,
 } from 'lucide-react'
 import {
-  allTasks,
-  formatDue,
-  isDueToday,
-  isOverdue,
-  setTaskDone,
-  allCategories,
-  categoryLabel,
-  priorityLabel,
-  priorityOrder,
-  useTasks,
-} from '@/features/tasks/data'
-import type { AgencyTask } from '@/features/tasks/data'
-import { relatedVisit } from '@/features/tasks/data'
-import type { TaskPriority } from '@/features/tasks/data'
-import { CreateTaskDialog } from '@/features/tasks/CreateTaskDialog'
-import { TemplateDialog } from '@/features/tasks/TemplateDialog'
-import {
-  BulkAssignDialog,
-  MarkAllCompleteDialog,
-} from '@/features/tasks/BulkDialogs'
+  CATEGORY_VALUES,
+  PRIORITY_VALUES,
+  toUiPriority,
+  useBulkComplete,
+  useCreateTask,
+  useTasksScreen,
+  type BackendCategory,
+  type BackendPriority,
+  type BackendStatus,
+  type CreateTaskInput,
+  type TaskTab,
+} from '@/features/tasks/useTasks'
 import { Avatar } from '@/components/ui/Avatar'
+import { Drawer } from '@/components/ui/Drawer'
 import { DropdownMenu } from '@/components/ui/DropdownMenu'
 import type { MenuItem } from '@/components/ui/DropdownMenu'
 import { Pagination } from '@/components/ui/Pagination'
 import { SelectFilter } from '@/components/ui/SelectFilter'
 import { PriorityBadge } from '@/components/ui/StatusBadge'
-import { formatTime } from '@/features/monitoring/live-data'
-import { TODAY } from '@/lib/today'
-import { StatusCell } from '@/features/tasks/TaskStatus'
-import { statusOf } from '@/features/tasks/status'
 import { cn } from '@/lib/cn'
 
 /*
- * The design's four, and its badges: a count rides on the two that are a
- * number somebody acts on. "All Tasks" means all of them — open and ticked off
- * — which is what makes the Status filter beside it worth having.
+ * The backend's four tabs, each mapped to the query's `tab`. A count rides on
+ * Today and Overdue, read off the screen's tab counts.
  */
 const tabs = [
-  { slug: 'all', label: 'All Tasks' },
-  { slug: 'today', label: "Today's Tasks", badge: true },
-  { slug: 'overdue', label: 'Overdue', badge: true, urgent: true },
-  { slug: 'done', label: 'Completed' },
+  { slug: 'all', label: 'All Tasks', tab: 'ALL' as TaskTab },
+  { slug: 'today', label: "Today's Tasks", tab: 'TODAY' as TaskTab, badge: true },
+  { slug: 'overdue', label: 'Overdue', tab: 'OVERDUE' as TaskTab, badge: true, urgent: true },
+  { slug: 'done', label: 'Completed', tab: 'COMPLETED' as TaskTab },
 ] as const
 
 type TabSlug = (typeof tabs)[number]['slug']
 
 const PAGE_SIZE = 10
 
-function matches(term: string, ...fields: (string | null | undefined)[]): boolean {
-  return (
-    term === '' ||
-    fields.some((f) => f != null && f.toLowerCase().includes(term))
-  )
+const CATEGORY_LABELS: Record<BackendCategory, string> = {
+  CARE_ACTIVITY: 'Care Activity',
+  MEDICATION: 'Medication',
+  DOCUMENTATION: 'Documentation',
+  SCHEDULING: 'Scheduling',
+  COMPLIANCE: 'Compliance',
+  ADMINISTRATIVE: 'Administrative',
+  OTHER: 'Other',
+}
+
+const PRIORITY_LABELS: Record<BackendPriority, string> = {
+  URGENT: 'Urgent',
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+}
+
+const STATUS_DOT: Record<string, string> = {
+  OPEN: 'bg-sunken text-ink-muted',
+  IN_PROGRESS: 'bg-brand-50 text-brand-700',
+  DONE: 'bg-emerald-50 text-emerald-700',
 }
 
 /**
- * The list as a spreadsheet, built in the browser from the rows on screen.
- *
- * The design's Export sat on several screens as a button with no handler. This
- * one writes what is actually in front of you — the current tab, filters and
- * search included — so the file and the table can never disagree. Nothing is
- * sent anywhere: the CSV is assembled here and handed to the download.
- */
-function exportTasks(rows: AgencyTask[], scope: string): void {
-  const cell = (value: string | null | undefined): string => {
-    const text = value ?? ''
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
-  }
-  const header = [
-    'Task',
-    'Kind',
-    'Category',
-    'Priority',
-    'Assignee',
-    'Care recipient',
-    'Due',
-    'Status',
-    'Why it is on the list',
-  ]
-  const lines = [
-    header.join(','),
-    ...rows.map((t) =>
-      [
-        cell(t.title),
-        t.origin === 'written' ? 'Written' : 'Worked out',
-        cell(categoryLabel(t.category)),
-        cell(priorityLabel(t.priority)),
-        cell(t.assignee ?? 'Unassigned'),
-        cell(t.recipientName),
-        cell(t.due),
-        t.done ? 'Ticked off' : 'Open',
-        cell(t.source ?? (t.origin === 'written' ? 'Written down by hand' : '')),
-      ].join(','),
-    ),
-  ]
-  // The BOM is what makes Excel read the accented names as UTF-8.
-  const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], {
-    type: 'text/csv;charset=utf-8',
-  })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `tasks-${scope}-${TODAY}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-/**
- * Tasks — everything the agency owes, worked out and written down together.
- *
- * The list is two things at once and says which is which on every row. Most of
- * it is derived: paperwork missing off a visit, a licence about to lapse, an
- * incident nobody has settled, a request nobody has answered. Those cannot be
- * ticked off here, because ticking one would not file the write-up — the row
- * goes when the record changes, and that is the only honest way for it to go.
- * The rest is typed by a coordinator and ticked off by one.
- *
- * What is deliberately not here: bulk assign, and a "mark all complete" that
- * would tick a page of rows nobody looked at.
+ * Tasks, read live from the back office. One request powers the screen: the KPI
+ * tiles, the tab counts and the filtered, paginated list all come off
+ * `GET /admin/tasks`, which returns stored tasks with their labels already
+ * worked out. The old client side simulation (derived rows, a Source filter and
+ * SLA timers) is gone, since none of it had a backend source.
  */
 export function TasksPage() {
   const [params, setParams] = useSearchParams()
   const [creating, setCreating] = useState(false)
-  const [templating, setTemplating] = useState(false)
-  const [assigning, setAssigning] = useState(false)
-  const [completing, setCompleting] = useState(false)
-
-  // Written tasks are stored, so the list has to be told when one is added or
-  // ticked; the worked-out half recomputes with it.
-  const version = useTasks()
-  const tasks = useMemo(() => {
-    void version
-    return allTasks()
-  }, [version])
 
   const rawTab = params.get('tab') ?? 'all'
-  const tab = (tabs.find((t) => t.slug === rawTab)?.slug ?? 'all') as TabSlug
+  const tabDef = tabs.find((t) => t.slug === rawTab) ?? tabs[0]
+  const tab = tabDef.slug as TabSlug
   const search = params.get('q') ?? ''
-  const term = search.trim().toLowerCase()
 
-  const assigneeOptions = useMemo(() => {
-    const names = new Set<string>()
-    for (const t of tasks) if (t.assignee) names.add(t.assignee)
-    return [...names].sort((a, b) => a.localeCompare(b))
-  }, [tasks])
+  const rawPriority = (params.get('priority') ?? '').toUpperCase()
+  const priority = PRIORITY_VALUES.includes(rawPriority as BackendPriority)
+    ? (rawPriority as BackendPriority)
+    : null
+  const rawCategory = (params.get('category') ?? '').toUpperCase()
+  const category = CATEGORY_VALUES.includes(rawCategory as BackendCategory)
+    ? (rawCategory as BackendCategory)
+    : null
+  const rawStatus = (params.get('status') ?? '').toUpperCase()
+  const status = (['OPEN', 'IN_PROGRESS', 'DONE'] as const).includes(
+    rawStatus as BackendStatus,
+  )
+    ? (rawStatus as BackendStatus)
+    : null
 
-  const categoryOptions = useMemo(() => {
-    const present = new Set(tasks.map((t) => t.category))
-    return allCategories()
-      .filter((c) => present.has(c.id))
-      .map((c) => ({ value: c.id, label: c.label }))
-  }, [tasks])
+  const requestedPage = Number(params.get('page'))
+  const pageNumber = Number.isInteger(requestedPage) && requestedPage >= 1 ? requestedPage : 1
 
-  const priorityOptions = useMemo(() => {
-    const present = new Set(tasks.map((t) => t.priority))
-    return priorityOrder
-      .filter((p) => present.has(p))
-      .map((p) => ({ value: p as string, label: priorityLabel(p) }))
-  }, [tasks])
-
-  const rawAssignee = params.get('who') ?? 'all'
-  const assignee = assigneeOptions.includes(rawAssignee) ? rawAssignee : 'all'
-  const rawCategory = params.get('category') ?? 'all'
-  const category = categoryOptions.some((o) => o.value === rawCategory)
-    ? rawCategory
-    : 'all'
-  const rawPriority = params.get('priority') ?? 'all'
-  const priority = priorityOptions.some((o) => o.value === rawPriority)
-    ? rawPriority
-    : 'all'
-  const rawSource = params.get('source') ?? 'all'
-  const source = ['worked-out', 'written'].includes(rawSource) ? rawSource : 'all'
-  const rawStatus = params.get('status') ?? 'all'
-  const status = ['open', 'done'].includes(rawStatus) ? rawStatus : 'all'
-  const rawDue = params.get('due') ?? 'all'
-  const due = ['overdue', 'today', 'later', 'none'].includes(rawDue) ? rawDue : 'all'
+  const query = useTasksScreen({
+    tab: tabDef.tab,
+    search,
+    priority,
+    category,
+    status,
+    page: pageNumber,
+    pageSize: PAGE_SIZE,
+  })
 
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params)
@@ -202,142 +124,67 @@ export function TasksPage() {
     setParams(next, { replace: key === 'q' })
   }
 
-  const shown = useMemo(
-    () =>
-      tasks.filter(
-        (t) =>
-          (tab === 'done'
-            ? t.done
-            : tab === 'today'
-              ? isDueToday(t)
-              : tab === 'overdue'
-                ? isOverdue(t)
-                : true) &&
-          (status === 'all' || (status === 'done' ? t.done : !t.done)) &&
-          (due === 'all' ||
-            (due === 'overdue'
-              ? isOverdue(t)
-              : due === 'today'
-                ? isDueToday(t)
-                : due === 'none'
-                  ? t.due === null
-                  : t.due !== null && t.due > TODAY)) &&
-          (assignee === 'all' || t.assignee === assignee) &&
-          (category === 'all' || t.category === category) &&
-          (priority === 'all' || t.priority === priority) &&
-          (source === 'all' || t.origin === source) &&
-          matches(term, t.title, t.assignee, t.recipientName, t.source),
-      ),
-    [tasks, tab, status, due, assignee, category, priority, source, term],
+  const bulkComplete = useBulkComplete()
+  const data = query.data
+
+  const bulkableIds = useMemo(
+    () => (data?.rows ?? []).filter((r) => r.status !== 'DONE').map((r) => r.id),
+    [data],
   )
 
-  const counts = {
-    // What each tab holds, so "n of m shown" under the filters is m for the
-    // tab you are on. "All Tasks" is now everything, ticked off included.
-    all: tasks.length,
-    today: tasks.filter((t) => isDueToday(t)).length,
-    overdue: tasks.filter((t) => isOverdue(t)).length,
-    done: tasks.filter((t) => t.done).length,
-  }
-
-  const open = tasks.filter((t) => !t.done)
-  const written = tasks.filter((t) => t.origin === 'written')
-  /*
-   * Ticked off today, read off the task's own history rather than assumed: a
-   * written task records "Marked complete" with the minute it happened. A
-   * worked-out row cannot be ticked at all, so it can never appear here.
-   */
-  const doneToday = tasks.filter((t) =>
-    (t.activity ?? []).some(
-      (e) => e.text === 'Marked complete' && e.at.slice(0, 10) === TODAY,
-    ),
-  ).length
-  /*
-   * A rate over the tasks that can actually be ticked. Counting the worked-out
-   * rows in the denominator would peg it near zero for ever — those clear when
-   * their record changes, which is not somebody completing anything.
-   */
-  const writtenDone = written.filter((t) => t.done).length
-  const completionRate =
-    written.length === 0 ? null : Math.round((writtenDone / written.length) * 100)
-
-  const tiles = [
+  const kpis = data?.kpis
+  const tiles: { id: string; label: string; icon: LucideIcon; tone: string; value: string }[] = [
     {
       id: 'open',
       label: 'Open Tasks',
       icon: FolderOpen,
       tone: 'text-brand-600',
-      // Open, not the All tab's total: a ticked-off task is not outstanding.
-      value: open.length,
-      hint: `${open.filter((t) => t.origin === 'worked-out').length} worked out, ${open.filter((t) => t.origin === 'written').length} written`,
+      value: kpis ? String(kpis.openTasks) : '—',
     },
     {
       id: 'done-today',
       label: 'Completed Today',
       icon: CircleCheck,
       tone: 'text-emerald-600',
-      value: doneToday,
-      hint: 'Ticked off today',
+      value: kpis ? String(kpis.completedToday) : '—',
     },
     {
       id: 'overdue',
       label: 'Overdue Tasks',
       icon: TriangleAlert,
       tone: 'text-red-600',
-      value: counts.overdue,
-      hint: 'Past their date',
-      urgent: counts.overdue > 0,
+      value: kpis ? String(kpis.overdue) : '—',
     },
     {
       id: 'urgent',
       label: 'High Priority',
       icon: ShieldAlert,
       tone: 'text-amber-600',
-      value: open.filter((t) => t.priority === 'critical' || t.priority === 'high')
-        .length,
-      hint: 'Critical or high, still open',
+      value: kpis ? String(kpis.highPriority) : '—',
     },
     {
       id: 'today',
       label: 'Tasks Due Today',
       icon: Clock,
       tone: 'text-sky-600',
-      value: counts.today,
-      hint: 'Dated today and not yet done',
+      value: kpis ? String(kpis.dueToday) : '—',
     },
     {
       id: 'rate',
       label: 'Completion Rate',
       icon: TrendingUp,
       tone: 'text-emerald-600',
-      value: completionRate === null ? '—' : `${completionRate}%`,
-      hint: `${writtenDone} of ${written.length} written tasks ticked off`,
+      value: kpis ? `${kpis.completionRatePercent}%` : '—',
     },
   ]
 
-  /*
-   * What the two bulk operations act on: the written rows the screen is
-   * showing and has not ticked. Never the whole list, and never a worked-out
-   * row — one has no assignee of its own and the other cannot be ticked.
-   */
-  const bulkable = shown.filter((t) => t.origin === 'written' && !t.done)
-
-  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
-  const requestedPage = Number(params.get('page'))
-  const pageNumber =
-    Number.isInteger(requestedPage) && requestedPage >= 1
-      ? Math.min(requestedPage, pageCount)
-      : 1
-  const page = shown.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE)
-
   const filtered =
-    assignee !== 'all' ||
-    category !== 'all' ||
-    priority !== 'all' ||
-    source !== 'all' ||
-    status !== 'all' ||
-    due !== 'all' ||
-    term !== ''
+    priority !== null ||
+    category !== null ||
+    status !== null ||
+    search.trim() !== ''
+
+  const pageCount = Math.max(1, data?.totalPages ?? 1)
 
   return (
     <div className="space-y-5">
@@ -348,38 +195,13 @@ export function TasksPage() {
             Manage operational tasks, care activities and internal assignments.
           </p>
         </div>
-
-        {/* The design's three. Each one does the thing it names: the file is
-            written from the rows on screen, the template dialog is the one the
-            Task Templates screen uses, and Create Task is the form that was
-            already here. */}
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => exportTasks(shown, tab)}
-            aria-disabled={shown.length === 0}
-            title={
-              shown.length === 0
-                ? 'Nothing on screen to export.'
-                : `Download the ${shown.length} row${shown.length === 1 ? '' : 's'} showing, as a CSV`
-            }
-            className="border-control text-ink hover:bg-sunken inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg border px-4 text-sm font-medium aria-disabled:cursor-default aria-disabled:opacity-55 aria-disabled:hover:bg-transparent"
-          >
-            <Download className="size-4 shrink-0" strokeWidth={1.9} aria-hidden="true" />
-            Export
-          </button>
-          <button
-            type="button"
-            onClick={() => setTemplating(true)}
+          <Link
+            to="/tasks/templates"
             className="border-control text-ink hover:bg-sunken inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg border px-4 text-sm font-medium"
           >
-            <LayoutTemplate
-              className="size-4 shrink-0"
-              strokeWidth={1.9}
-              aria-hidden="true"
-            />
-            Create Template
-          </button>
+            Templates
+          </Link>
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -392,16 +214,6 @@ export function TasksPage() {
       </header>
 
       {creating && <CreateTaskDialog onClose={() => setCreating(false)} />}
-      {templating && <TemplateDialog onClose={() => setTemplating(false)} />}
-      {assigning && (
-        <BulkAssignDialog tasks={bulkable} onClose={() => setAssigning(false)} />
-      )}
-      {completing && (
-        <MarkAllCompleteDialog
-          tasks={bulkable}
-          onClose={() => setCompleting(false)}
-        />
-      )}
 
       <section aria-labelledby="task-totals">
         <h2 id="task-totals" className="sr-only">
@@ -414,22 +226,10 @@ export function TasksPage() {
                 <span className="text-ink-subtle block text-xs font-semibold tracking-wide uppercase">
                   {t.label}
                 </span>
-                <t.icon
-                  className={cn('size-4 shrink-0', t.tone)}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                />
+                <t.icon className={cn('size-4 shrink-0', t.tone)} strokeWidth={2} aria-hidden="true" />
               </div>
-              <span
-                className={cn(
-                  'mt-2 block text-2xl font-bold tracking-tight tabular-nums',
-                  t.urgent ? 'text-red-600' : 'text-ink',
-                )}
-              >
+              <span className="text-ink mt-2 block text-2xl font-bold tracking-tight tabular-nums">
                 {t.value}
-              </span>
-              <span className="text-ink-subtle mt-1 block text-xs break-words">
-                {t.hint}
               </span>
             </article>
           ))}
@@ -443,7 +243,13 @@ export function TasksPage() {
       >
         {tabs.map((t) => {
           const active = t.slug === tab
-          const badge = 'badge' in t && t.badge ? counts[t.slug] : null
+          const counts = data?.tabCounts
+          const badge =
+            'badge' in t && t.badge && counts
+              ? t.slug === 'today'
+                ? counts.today
+                : counts.overdue
+              : null
           return (
             <button
               key={t.slug}
@@ -477,133 +283,102 @@ export function TasksPage() {
         })}
       </div>
 
-      <div className="space-y-2">
-        {/* One row: the search box and the filter chips side by side, straight
-            on the page rather than in a card. It wraps on a narrow screen. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="relative w-full min-w-0 sm:w-64">
-            <span className="sr-only">Search tasks</span>
-            <Search
-              className="text-ink-subtle pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
-              strokeWidth={1.9}
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => set('q', e.target.value)}
-              placeholder="Search tasks..."
-              className="border-line bg-canvas focus:border-brand-500 focus:bg-surface h-10 w-full rounded-lg border pr-3 pl-9 text-sm"
-            />
-          </label>
-          <SelectFilter
-            chip
-            quiet
-            label="Assigned To"
-            value={assignee}
-            onChange={(v) => set('who', v)}
-            options={[
-              { value: 'all', label: 'Anyone' },
-              ...assigneeOptions.map((n) => ({ value: n, label: n })),
-            ]}
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="relative w-full min-w-0 sm:w-64">
+          <span className="sr-only">Search tasks</span>
+          <Search
+            className="text-ink-subtle pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+            strokeWidth={1.9}
+            aria-hidden="true"
           />
-          <SelectFilter
-            chip
-            quiet
-            label="Priority"
-            value={priority}
-            onChange={(v) => set('priority', v)}
-            options={[{ value: 'all', label: 'All' }, ...priorityOptions]}
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => set('q', e.target.value)}
+            placeholder="Search tasks..."
+            className="border-line bg-canvas focus:border-brand-500 focus:bg-surface h-10 w-full rounded-lg border pr-3 pl-9 text-sm"
           />
-          <SelectFilter
-            chip
-            quiet
-            label="Category"
-            value={category}
-            onChange={(v) => set('category', v)}
-            options={[{ value: 'all', label: 'All' }, ...categoryOptions]}
-          />
-          <SelectFilter
-            chip
-            quiet
-            label="Status"
-            value={status}
-            onChange={(v) => set('status', v)}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'open', label: 'Open' },
-              { value: 'done', label: 'Ticked off' },
-            ]}
-          />
-          <SelectFilter
-            chip
-            quiet
-            label="Due Date"
-            value={due}
-            onChange={(v) => set('due', v)}
-            options={[
-              { value: 'all', label: 'Any' },
-              { value: 'overdue', label: 'Overdue' },
-              { value: 'today', label: 'Today' },
-              { value: 'later', label: 'Later' },
-              // A written task can be typed with no date on it; a worked-out
-              // one always carries the date its own record holds.
-              { value: 'none', label: 'No date' },
-            ]}
-          />
-          {/* The filter the design has no equivalent of, and the one this list
-              most needs: the two halves behave differently. */}
-          <SelectFilter
-            chip
-            quiet
-            label="Source"
-            value={source}
-            onChange={(v) => set('source', v)}
-            options={[
-              { value: 'all', label: 'Both kinds' },
-              { value: 'worked-out', label: 'Worked out' },
-              { value: 'written', label: 'Written down' },
-            ]}
-          />
-          {filtered && (
-            <button
-              type="button"
-              onClick={() => {
-                const next = new URLSearchParams(params)
-                for (const key of [
-                  'who',
-                  'priority',
-                  'category',
-                  'source',
-                  'status',
-                  'due',
-                  'q',
-                  'page',
-                ])
-                  next.delete(key)
-                setParams(next)
-              }}
-              className="text-brand-700 hover:text-brand-800 inline-flex min-h-11 items-center px-1 text-sm font-medium"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-        {/* Only while something is narrowing the list: "49 of 49" at rest is a
-            line that never tells anybody anything. */}
+        </label>
+        <SelectFilter
+          chip
+          quiet
+          label="Priority"
+          value={priority ?? 'all'}
+          onChange={(v) => set('priority', v)}
+          options={[
+            { value: 'all', label: 'All' },
+            ...PRIORITY_VALUES.map((p) => ({ value: p, label: PRIORITY_LABELS[p] })),
+          ]}
+        />
+        <SelectFilter
+          chip
+          quiet
+          label="Category"
+          value={category ?? 'all'}
+          onChange={(v) => set('category', v)}
+          options={[
+            { value: 'all', label: 'All' },
+            ...CATEGORY_VALUES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] })),
+          ]}
+        />
+        <SelectFilter
+          chip
+          quiet
+          label="Status"
+          value={status ?? 'all'}
+          onChange={(v) => set('status', v)}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'OPEN', label: 'Open' },
+            { value: 'IN_PROGRESS', label: 'In progress' },
+            { value: 'DONE', label: 'Completed' },
+          ]}
+        />
         {filtered && (
-          <p className="text-ink-subtle text-xs" aria-live="polite">
-            {shown.length} of {counts[tab]} shown.
-          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(params)
+              for (const key of ['priority', 'category', 'status', 'q', 'page']) next.delete(key)
+              setParams(next)
+            }}
+            className="text-brand-700 hover:text-brand-800 inline-flex min-h-11 items-center px-1 text-sm font-medium"
+          >
+            Clear filters
+          </button>
+        )}
+        {bulkableIds.length > 0 && (
+          <button
+            type="button"
+            onClick={() => bulkComplete.mutate(bulkableIds)}
+            disabled={bulkComplete.isPending}
+            className="border-control text-ink hover:bg-sunken ml-auto inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 text-sm font-medium disabled:opacity-50"
+          >
+            <Users className="size-4 shrink-0" strokeWidth={1.9} aria-hidden="true" />
+            Complete the {bulkableIds.length} showing
+          </button>
         )}
       </div>
 
-      {/* No card and no heading above it: the design starts this block at the
-          table's own header row, and the tab chips already name the list. The
-          block still closes properly — sides, bottom rule and a rounded bottom
-          edge under the pager, as the design draws it. */}
-      <div className="bg-surface border-line overflow-hidden rounded-b-xl border-x border-b">
-        {shown.length === 0 ? (
+      <div className="bg-surface border-line overflow-hidden rounded-xl border">
+        {query.isPending ? (
+          <p className="text-ink-subtle px-4 py-10 text-center text-sm" role="status">
+            Loading tasks…
+          </p>
+        ) : query.isError ? (
+          <div className="px-4 py-10 text-center">
+            <p className="text-sm text-red-600" role="status">
+              Could not load tasks.
+            </p>
+            <button
+              type="button"
+              onClick={() => query.refetch()}
+              className="text-brand-700 hover:text-brand-800 mt-2 text-sm font-semibold"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (data?.rows.length ?? 0) === 0 ? (
           <p className="text-ink-subtle px-4 py-10 text-center text-sm" role="status">
             Nothing here matches those filters.
           </p>
@@ -612,430 +387,261 @@ export function TasksPage() {
             <div
               tabIndex={0}
               role="region"
-              aria-label={`${tabs.find((t) => t.slug === tab)!.label} table`}
+              aria-label={`${tabDef.label} table`}
               className="hidden overflow-x-auto xl:block"
             >
               <table className="w-full min-w-4xl text-left text-sm">
                 <thead className="text-ink-subtle bg-sunken text-xs">
                   <tr className="border-line border-b">
-                    {[
-                      'Task Name',
-                      'Related Visit',
-                      'Assigned To',
-                      'Recipient',
-                      'Due Date',
-                      'Priority',
-                      'Status',
-                      'Actions',
-                    ].map((col) => (
-                      <th
-                        key={col}
-                        scope="col"
-                        className="px-4 py-3.5 font-semibold tracking-wide uppercase whitespace-nowrap"
-                      >
-                        {col}
-                      </th>
-                    ))}
+                    {['Task Name', 'Related Visit', 'Assigned To', 'Recipient', 'Due Date', 'Priority', 'Status', 'Actions'].map(
+                      (col) => (
+                        <th
+                          key={col}
+                          scope="col"
+                          className="px-4 py-3.5 font-semibold tracking-wide uppercase whitespace-nowrap"
+                        >
+                          {col}
+                        </th>
+                      ),
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-line divide-y">
-                  {page.map((task) => {
-                    const status = statusOf(task)
-                    // Only the visit a row actually came off. `relatedVisit`
-                    // will also offer the visit a written task merely falls
-                    // alongside, which is a good guess on the details page and
-                    // a fact stated in a table cell here.
-                    const visit = task.visitId ? relatedVisit(task) : undefined
-                    return (
-                      <tr
-                        key={task.id}
-                        className={cn(
-                          'transition-colors',
-                          isOverdue(task) ? 'bg-red-50/50' : 'hover:bg-canvas',
-                          task.done && 'text-ink-muted',
-                        )}
-                      >
-                        <th
-                          scope="row"
-                          className="max-w-xs px-4 py-3.5 text-left"
-                          // The sentence that used to sit under the name — why
-                          // this row exists — is a line and a half of prose in
-                          // a table cell. It stays on the row as its tooltip
-                          // and in full on the task itself; the cell keeps the
-                          // name and the category, which is what a scan needs.
-                          title={task.source ? `${task.title} — ${task.source}` : task.title}
-                        >
-                          <Link
-                            to={`/tasks/${task.id}`}
-                            className={cn(
-                              'block truncate font-semibold',
-                              task.done
-                                ? 'text-ink-muted line-through'
-                                : 'text-ink hover:text-brand-700',
-                            )}
-                          >
-                            {task.title}
-                          </Link>
-                          <span className="text-ink-subtle block truncate text-xs font-normal">
-                            {categoryLabel(task.category)}
-                          </span>
-                        </th>
-                        <td className="text-ink-muted px-4 py-3.5">
-                          {visit ? (
-                            <Link
-                              to={`/scheduling/visits/${visit.id}/overview`}
-                              className="hover:text-brand-700 break-words"
-                            >
-                              {visit.type}
-                            </Link>
-                          ) : (
-                            <span className="text-ink-subtle" aria-hidden="true">
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {task.assignee ? (
-                            <span className="flex items-center gap-2">
-                              <Avatar
-                                name={task.assignee}
-                                decorative
-                                className="size-6 text-[0.625rem]"
-                              />
-                              {task.assignee}
-                            </span>
-                          ) : (
-                            <span className="font-medium text-red-700">Nobody</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {task.recipientId ? (
-                            <Link
-                              to={`/care-recipients/${task.recipientId}`}
-                              className="text-ink hover:text-brand-700"
-                            >
-                              {task.recipientName}
-                            </Link>
-                          ) : (
-                            <span className="text-ink-subtle" aria-hidden="true">
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td
-                          className={cn(
-                            'px-4 py-3.5 whitespace-nowrap',
-                            isOverdue(task)
-                              ? 'font-semibold text-red-600'
-                              : 'text-ink-muted',
-                          )}
-                        >
-                          {formatDue(task.due)}
-                          {task.dueTime && `, ${formatTime(task.dueTime)}`}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* A dot and a word, as the design has it — the pill
-                              form of this is still on the details page. */}
-                          <span className="inline-flex items-center gap-2">
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                'size-2 shrink-0 rounded-full',
-                                priorityDot[task.priority],
-                              )}
-                            />
-                            <span
-                              className={cn(
-                                isOverdue(task) ? 'text-red-600' : 'text-ink',
-                              )}
-                            >
-                              {priorityLabel(task.priority)}
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <StatusCell status={status} />
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <DropdownMenu
-                            label={`Actions for ${task.title}`}
-                            items={menuFor(task)}
-                          />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <ul className="divide-line border-line divide-y border-t xl:hidden">
-              {page.map((task) => (
-                <li key={task.id} className="p-4">
-                  <div className="flex items-start gap-2.5">
-                    {task.origin === 'written' && (
-                      <input
-                        type="checkbox"
-                        checked={task.done}
-                        onChange={(e) => setTaskDone(task.id, e.target.checked)}
-                        aria-label={`Mark "${task.title}" ${task.done ? 'not done' : 'done'}`}
-                        className="accent-brand-600 mt-1 size-4 shrink-0"
-                      />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                  {data?.rows.map((task) => (
+                    <tr key={task.id} className="hover:bg-canvas transition-colors">
+                      <th scope="row" className="max-w-xs px-4 py-3.5 text-left">
                         <Link
                           to={`/tasks/${task.id}`}
                           className={cn(
-                            'min-w-0 text-sm font-semibold break-words',
-                            task.done
+                            'block truncate font-semibold',
+                            task.status === 'DONE'
                               ? 'text-ink-muted line-through'
                               : 'text-ink hover:text-brand-700',
                           )}
                         >
                           {task.title}
                         </Link>
-                        <PriorityBadge priority={task.priority} />
-                      </div>
-                      <p className="text-ink-muted mt-1 text-xs break-words">
-                        {categoryLabel(task.category)}
-                        {task.source && ` · ${task.source}`}
-                      </p>
-                      <p className="text-ink-subtle mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                        <span>{task.assignee ?? 'Nobody'}</span>
-                        {task.recipientName && <span>· {task.recipientName}</span>}
+                        <span className="text-ink-subtle block truncate text-xs font-normal">
+                          {task.categoryLabel}
+                        </span>
+                      </th>
+                      <td className="text-ink-muted px-4 py-3.5">
+                        {task.relatedVisitLabel ?? (
+                          <span className="text-ink-subtle" aria-hidden="true">
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="flex items-center gap-2">
+                          <Avatar name={task.assignee} decorative className="size-6 text-[0.625rem]" />
+                          {task.assignee}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        {task.recipientName ?? (
+                          <span className="text-ink-subtle" aria-hidden="true">
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-ink-muted px-4 py-3.5 whitespace-nowrap">
+                        {task.dueDateLabel ?? 'No date'}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <PriorityBadge priority={toUiPriority(task.priority)} />
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
                         <span
                           className={cn(
-                            isOverdue(task) && 'font-semibold text-red-700',
+                            'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold',
+                            STATUS_DOT[task.status] ?? 'bg-sunken text-ink-muted',
                           )}
                         >
-                          · {formatDue(task.due)}
+                          {task.statusLabel}
                         </span>
-                        <SourceChip task={task} />
-                      </p>
-                    </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <DropdownMenu label={`Actions for ${task.title}`} items={rowMenu(task.id, task.recipientName)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <ul className="divide-line divide-y xl:hidden">
+              {data?.rows.map((task) => (
+                <li key={task.id} className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                    <Link
+                      to={`/tasks/${task.id}`}
+                      className={cn(
+                        'min-w-0 text-sm font-semibold break-words',
+                        task.status === 'DONE'
+                          ? 'text-ink-muted line-through'
+                          : 'text-ink hover:text-brand-700',
+                      )}
+                    >
+                      {task.title}
+                    </Link>
+                    <PriorityBadge priority={toUiPriority(task.priority)} />
                   </div>
+                  <p className="text-ink-muted mt-1 text-xs break-words">{task.categoryLabel}</p>
+                  <p className="text-ink-subtle mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <span>{task.assignee}</span>
+                    {task.recipientName && <span>· {task.recipientName}</span>}
+                    <span>· {task.dueDateLabel ?? 'No date'}</span>
+                  </p>
                 </li>
               ))}
             </ul>
-
           </>
         )}
-        {/* No wrapper rule: `Pagination` draws its own top border, and the two
-            together read as a double line under the last row. */}
         {pageCount > 1 && (
           <Pagination
             page={pageNumber}
             pageCount={pageCount}
             onPageChange={(p) => set('page', String(p))}
-            summary={`Showing ${(pageNumber - 1) * PAGE_SIZE + 1}–${Math.min(pageNumber * PAGE_SIZE, shown.length)} of ${shown.length} tasks`}
+            summary={`Page ${pageNumber} of ${pageCount}${data ? `, ${data.total} tasks` : ''}`}
           />
         )}
       </div>
-
-      {/*
-        The design's Quick Operations. Two of these four act on rows rather
-        than opening a form, and both are scoped to what the screen is showing
-        and to the written rows in it — "all" over a list nobody has read is
-        how a page of work gets ticked by accident. Each card says its scope
-        rather than promising a batch job there is nothing behind.
-      */}
-      <section aria-labelledby="quick-operations" className="space-y-3">
-        <h2 id="quick-operations" className="text-ink text-sm font-semibold">
-          Quick Operations
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <QuickOperation
-            primary
-            icon={Plus}
-            title="Create Task"
-            detail="Write a task down by hand"
-            onSelect={() => setCreating(true)}
-          />
-          <QuickOperation
-            icon={Users}
-            iconTone="bg-brand-50 text-brand-700"
-            title="Bulk Assign"
-            detail={
-              bulkable.length === 0
-                ? 'Nothing written is showing'
-                : `Hand the ${bulkable.length} written task${bulkable.length === 1 ? '' : 's'} showing to one person`
-            }
-            disabled={bulkable.length === 0}
-            onSelect={() => setAssigning(true)}
-          />
-          <QuickOperation
-            icon={CircleCheck}
-            iconTone="bg-emerald-50 text-emerald-600"
-            title="Mark All Complete"
-            detail={
-              bulkable.length === 0
-                ? 'Nothing showing can be ticked'
-                : `Tick off the ${bulkable.length} written task${bulkable.length === 1 ? '' : 's'} showing`
-            }
-            disabled={bulkable.length === 0}
-            onSelect={() => setCompleting(true)}
-          />
-          <QuickOperation
-            icon={Copy}
-            title="View Templates"
-            detail="Reusable checklists to raise a task from"
-            to="/tasks/templates"
-          />
-        </div>
-      </section>
-
     </div>
   )
 }
 
-/**
- * One Quick Operations card: an icon tile, what it does, and the row it acts
- * on. A card that opens a page is a link; one that opens a dialog is a button.
- */
-function QuickOperation({
-  icon: Icon,
-  iconTone = 'bg-sunken text-ink-muted',
-  title,
-  detail,
-  to,
-  onSelect,
-  primary = false,
-  disabled = false,
-}: {
-  icon: LucideIcon
-  iconTone?: string
-  title: string
-  detail: string
-  to?: string
-  onSelect?: () => void
-  primary?: boolean
-  disabled?: boolean
-}) {
-  const body = (
-    <>
-      <span
-        className={cn(
-          'grid size-10 shrink-0 place-items-center rounded-lg',
-          primary ? 'bg-white/20 text-white' : iconTone,
-        )}
-      >
-        <Icon className="size-5" strokeWidth={2} aria-hidden="true" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            'block text-sm font-semibold',
-            primary ? 'text-white' : 'text-ink',
-          )}
-        >
-          {title}
-        </span>
-        <span
-          className={cn(
-            'mt-0.5 block text-xs break-words',
-            primary ? 'text-white/80' : 'text-ink-subtle',
-          )}
-        >
-          {detail}
-        </span>
-      </span>
-      <ChevronRight
-        className={cn(
-          'size-4 shrink-0',
-          primary ? 'text-white/80' : 'text-ink-subtle',
-        )}
-        strokeWidth={2}
-        aria-hidden="true"
-      />
-    </>
-  )
-
-  const shell = cn(
-    'flex w-full items-center gap-3 rounded-xl border p-3.5 text-left transition-colors',
-    primary
-      ? 'bg-brand-600 border-brand-600 hover:bg-brand-700'
-      : 'border-line bg-surface hover:bg-sunken',
-    disabled && 'cursor-default opacity-55 hover:bg-surface',
-  )
-
-  if (to)
-    return (
-      <Link to={to} className={shell}>
-        {body}
-      </Link>
-    )
-
-  return (
-    <button
-      type="button"
-      aria-disabled={disabled}
-      onClick={() => {
-        if (disabled) return
-        onSelect?.()
-      }}
-      className={shell}
-    >
-      {body}
-    </button>
-  )
-}
-
-/**
- * The design's four statuses, over what this app can actually see.
- *
- * "Completed" is the tick. "Overdue" is the date against the clock. "In
- * progress" is only claimed where a written task's own checklist has been
- * started and not finished — nothing else here observes work happening, and a
- * row that merely exists is Pending.
- */
-/** Full class strings — Tailwind cannot see a name built at runtime. */
-const priorityDot: Record<TaskPriority, string> = {
-  critical: 'bg-red-600',
-  high: 'bg-amber-500',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-500',
-  normal: 'bg-slate-400',
-}
-
-/**
- * The row menu. A written task can be ticked from here — the checkbox that
- * used to sit in the first cell moved into this list when the design gave the
- * table an Actions column. A worked-out row cannot: what settles it is the
- * record changing, so its menu offers the record instead.
- */
-function menuFor(task: AgencyTask): MenuItem[] {
-  const items: MenuItem[] = [{ id: 'open', label: 'Open task', to: `/tasks/${task.id}` }]
-  if (task.origin === 'written') {
-    items.push({
-      id: 'done',
-      label: task.done ? 'Reopen' : 'Mark complete',
-      onSelect: () => setTaskDone(task.id, !task.done),
-    })
-  } else {
-    items.push({ id: 'record', label: 'Open the record', to: task.to })
-  }
-  if (task.recipientId) {
-    items.push({
-      id: 'recipient',
-      label: `Open ${task.recipientName}`,
-      to: `/care-recipients/${task.recipientId}`,
-    })
-  }
+function rowMenu(id: string, recipientName: string | null): MenuItem[] {
+  const items: MenuItem[] = [{ id: 'open', label: 'Open task', to: `/tasks/${id}` }]
+  if (recipientName) items.push({ id: 'recipient', label: `About ${recipientName}`, to: `/tasks/${id}` })
   return items
 }
 
-function SourceChip({ task }: { task: AgencyTask }) {
+/**
+ * Create a task. The backend needs either an admin uuid or a free text label to
+ * assign to; there is no admin directory endpoint yet, so the form sends a free
+ * text assignee label (which the API accepts) rather than fabricating an id.
+ */
+function CreateTaskDialog({ onClose }: { onClose: () => void }) {
+  const create = useCreateTask()
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [assigneeLabel, setAssigneeLabel] = useState('')
+  const [priority, setPriority] = useState<BackendPriority>('MEDIUM')
+  const [categoryValue, setCategoryValue] = useState<BackendCategory>('CARE_ACTIVITY')
+  const [dueAt, setDueAt] = useState('')
+
+  const submit = () => {
+    if (title.trim() === '') return
+    const body: CreateTaskInput = {
+      title: title.trim(),
+      priority,
+      category: categoryValue,
+    }
+    if (description.trim() !== '') body.description = description.trim()
+    if (assigneeLabel.trim() !== '') body.assigneeLabel = assigneeLabel.trim()
+    if (dueAt !== '') body.dueAt = new Date(dueAt).toISOString()
+    create.mutate(body, { onSuccess: onClose })
+  }
+
   return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
-        task.origin === 'worked-out'
-          ? 'bg-brand-50 text-brand-700'
-          : 'bg-sunken text-ink-muted',
-      )}
-    >
-      {task.origin === 'worked-out' ? 'Worked out' : `By ${task.createdBy}`}
-    </span>
+    <Drawer open onClose={onClose} placement="center" title="Create task">
+      <div className="space-y-4 p-4 sm:p-5">
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Title</span>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Order incontinence supplies"
+            className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+          />
+        </label>
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Description</span>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            className="border-line focus:border-brand-500 mt-1.5 w-full rounded-lg border px-3 py-2 text-sm"
+          />
+        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-ink text-sm font-medium">Priority</span>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as BackendPriority)}
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            >
+              {PRIORITY_VALUES.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY_LABELS[p]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-ink text-sm font-medium">Category</span>
+            <select
+              value={categoryValue}
+              onChange={(e) => setCategoryValue(e.target.value as BackendCategory)}
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            >
+              {CATEGORY_VALUES.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-ink text-sm font-medium">Assign to</span>
+            <input
+              type="text"
+              value={assigneeLabel}
+              onChange={(e) => setAssigneeLabel(e.target.value)}
+              placeholder="A person or team name"
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-ink text-sm font-medium">Due</span>
+            <input
+              type="date"
+              value={dueAt}
+              onChange={(e) => setDueAt(e.target.value)}
+              className="border-line focus:border-brand-500 mt-1.5 h-11 w-full rounded-lg border px-3 text-sm"
+            />
+          </label>
+        </div>
+
+        {create.isError && (
+          <p className="text-sm text-red-600" role="status">
+            Could not create the task.
+          </p>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="border-control text-ink hover:bg-sunken inline-flex min-h-11 items-center rounded-lg border px-4 text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={title.trim() === '' || create.isPending}
+            onClick={submit}
+            className="bg-brand-600 hover:bg-brand-700 inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create task
+          </button>
+        </div>
+      </div>
+    </Drawer>
   )
 }
