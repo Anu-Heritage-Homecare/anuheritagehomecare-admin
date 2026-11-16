@@ -89,9 +89,9 @@ function effectOf(a: Adjustment): string {
     case 'completed':
       return 'Paid out.'
     case 'applied':
-      if (a.kind === 'credit') return `${formatMoney(a.amount)} taken off ${a.invoice}'s balance and what was billed.`
-      if (a.kind === 'write-off') return `${formatMoney(a.amount)} of ${a.invoice} will not be collected; still counted as billed.`
-      return `${signOf(a)}${formatMoney(a.amount)} on ${a.invoice}'s amount and balance.`
+      if (a.kind === 'credit') return `${formatMoney(a.amount, a.currency)} taken off ${a.invoice}'s balance and what was billed.`
+      if (a.kind === 'write-off') return `${formatMoney(a.amount, a.currency)} of ${a.invoice} will not be collected; still counted as billed.`
+      return `${signOf(a)}${formatMoney(a.amount, a.currency)} on ${a.invoice}'s amount and balance.`
   }
 }
 
@@ -373,7 +373,7 @@ export function CreditsAdjustmentsPage() {
                     <td className="py-3.5 pr-4 whitespace-nowrap"><Target a={a} /></td>
                     <td className="text-ink py-3.5 pr-4 text-right font-semibold whitespace-nowrap tabular-nums">
                       {signOf(a)}
-                      {formatMoney(a.amount)}
+                      {formatMoney(a.amount, a.currency)}
                     </td>
                     {showReason && (
                       <td className="text-ink-muted max-w-40 py-3.5 pr-4">
@@ -425,7 +425,7 @@ export function CreditsAdjustmentsPage() {
             <div className="flex items-center justify-between gap-3">
               <p className="text-ink text-2xl font-bold tracking-tight tabular-nums">
                 {signOf(selected)}
-                {formatMoney(selected.amount)}
+                {formatMoney(selected.amount, selected.currency)}
               </p>
               <span className={cn(pill, tonePill[statusTones[selected.status]])}>{statusLabel(selected)}</span>
             </div>

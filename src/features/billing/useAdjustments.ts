@@ -162,6 +162,7 @@ function toRow(dto: AdjustmentRowDto): Adjustment {
     type: dto.type,
     accountId: dto.billingAccountId,
     amount: toUnit(dto.amountMinor),
+    currency: dto.currency,
     at: dto.createdAt.slice(0, 10),
     status: toStatus(dto.status, kind),
     reason: dto.reason,

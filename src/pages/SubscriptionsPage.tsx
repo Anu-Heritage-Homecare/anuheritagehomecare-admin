@@ -591,7 +591,7 @@ export function SubscriptionsPage() {
         <Link to="/billing/plans/standard/general" className="text-brand-700">
           care plan catalogue
         </Link>
-        ; {formatMoney(planById['standard' as PlanId].monthlyPrice)} is the
+        ; {formatMoney(planById['standard' as PlanId].monthlyPrice, 'NGN')} is the
         Standard list price.
       </p>
     </div>

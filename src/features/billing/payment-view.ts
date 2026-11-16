@@ -28,7 +28,7 @@ export function downloadReceipt(p: AccountPayment, account: BillingAccount): voi
     ['Receipt for', p.txId ?? `Payment for ${p.reference}`],
     ['Billing account', `${account.name} (${account.ref})`],
     ['Pays for', p.reference],
-    ['Amount', formatMoney(p.amount)],
+    ['Amount', formatMoney(p.amount, 'NGN')],
     ['Method', p.method ?? 'Not recorded'],
     ...(p.bank ? ([['Bank', p.bank]] as [string, string][]) : []),
     ...(p.externalRef ? ([['Bank reference', p.externalRef]] as [string, string][]) : []),

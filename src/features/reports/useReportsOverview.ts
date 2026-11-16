@@ -149,6 +149,7 @@ export interface OverviewReportRecord {
 }
 
 export interface ReportsOverviewView {
+  currency: string
   kpis: OverviewKpis
   trend: OverviewMonthPoint[]
   revenue: { months: OverviewRevenueMonth[]; ytd: number }
@@ -190,6 +191,7 @@ function toView(dto: ReportsOverviewDto): ReportsOverviewView {
   const sat = dto.satisfactionBreakdown
   const satCount = sat.reduce((sum, row) => sum + row.count, 0)
   return {
+    currency: dto.currency,
     kpis: {
       totalVisits: dto.kpis.totalVisits,
       utilisation: dto.kpis.caregiverUtilizationPercent,

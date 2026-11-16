@@ -75,12 +75,12 @@ function Preview({ summary: s, from }: { summary: AccountSummary; from: string }
             <div className="flex justify-between gap-4 px-2.5 py-3">
               <dt className="text-ink-muted">Outstanding</dt>
               <dd className={cn('font-bold tabular-nums', s.outstanding > 0 ? 'text-red-600' : 'text-ink')}>
-                {formatMoney(s.outstanding)}
+                {formatMoney(s.outstanding, 'NGN')}
               </dd>
             </div>
             <div className="flex justify-between gap-4 px-2.5 py-3">
               <dt className="text-ink-muted">Total Billed</dt>
-              <dd className="text-ink font-bold tabular-nums">{formatMoney(totals.billed)}</dd>
+              <dd className="text-ink font-bold tabular-nums">{formatMoney(totals.billed, 'NGN')}</dd>
             </div>
             <div className="flex justify-between gap-4 px-2.5 py-3">
               <dt className="text-ink-muted">Last Payment</dt>
@@ -129,7 +129,7 @@ function Preview({ summary: s, from }: { summary: AccountSummary; from: string }
                         {l.paidAt ? `Paid ${fmt(l.paidAt)}` : `Due ${fmt(l.dueAt)}`}
                       </span>
                     </span>
-                    <span className="text-ink text-sm font-bold tabular-nums">{formatMoney(l.amount)}</span>
+                    <span className="text-ink text-sm font-bold tabular-nums">{formatMoney(l.amount, 'NGN')}</span>
                     <span className={cn(pill, tonePill[statementStatusTones[l.status]])}>
                       {statementStatusLabels[l.status]}
                     </span>

@@ -122,7 +122,7 @@ const starBar: Record<number, string> = {
 /* ------------------------------- the report ------------------------------- */
 
 function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRange }) {
-  const { kpis, trend, revenue, operational: mtd, workforce: staff, financial: fin, satisfaction: sat, activity } = view
+  const { currency, kpis, trend, revenue, operational: mtd, workforce: staff, financial: fin, satisfaction: sat, activity } = view
   const rangeLabel = reportRanges.find((r) => r.value === range)!.label.toLowerCase()
   const currentMonth = revenue.months.length > 0 ? revenue.months[revenue.months.length - 1].label : '—'
   const maxMonth = Math.max(1, ...revenue.months.map((m) => m.value))
@@ -138,7 +138,7 @@ function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRan
   const kpiCards: { label: string; value: string; note: string }[] = [
     { label: 'Total Visits', value: kpis.totalVisits.toLocaleString('en-US'), note: reportRanges.find((r) => r.value === range)!.label },
     { label: 'Caregiver Utilization', value: pctText(kpis.utilisation), note: 'Rostered ÷ available hours' },
-    { label: 'Revenue', value: formatMoney(kpis.revenueMajor), note: `Plan revenue · ${currentMonth}` },
+    { label: 'Revenue', value: formatMoney(kpis.revenueMajor, currency), note: `Plan revenue · ${currentMonth}` },
     {
       label: 'Client Satisfaction',
       value: kpis.satisfactionAvg === null ? '—' : `${kpis.satisfactionAvg}/5.0`,
@@ -149,7 +149,7 @@ function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRan
       value: pctText(kpis.completion),
       note: `As of today`,
     },
-    { label: 'Outstanding Invoices', value: formatMoney(kpis.outstandingMajor), note: 'As of today' },
+    { label: 'Outstanding Invoices', value: formatMoney(kpis.outstandingMajor, currency), note: 'As of today' },
   ]
 
   const trendCard = (
@@ -230,14 +230,14 @@ function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRan
       description={
         <>
           YTD Revenue:{' '}
-          <span className="font-semibold text-emerald-700 tabular-nums">{formatMoney(revenue.ytd)}</span>
+          <span className="font-semibold text-emerald-700 tabular-nums">{formatMoney(revenue.ytd, currency)}</span>
         </>
       }
       className="lg:col-span-2"
     >
       <div aria-hidden="true" className="bg-canvas flex h-48 items-end justify-between gap-3 rounded-xl px-4 pt-4 pb-2 sm:gap-4">
         {revenue.months.map((m) => (
-          <div key={m.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" title={formatCompact(m.value)}>
+          <div key={m.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" title={formatCompact(m.value, currency)}>
             <div
               className="bg-brand-600 w-full max-w-10 rounded-t-md"
               style={{ height: `${(m.value / maxMonth) * 100}%` }}
@@ -252,7 +252,7 @@ function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRan
           {revenue.months.map((m) => (
             <tr key={m.label}>
               <th scope="row">{m.label}</th>
-              <td>{formatMoney(m.value)}</td>
+              <td>{formatMoney(m.value, currency)}</td>
             </tr>
           ))}
         </tbody>
@@ -288,10 +288,10 @@ function Overview({ view, range }: { view: ReportsOverviewView; range: ReportRan
     <Card key="fin" title="Financial Summary" aside={<MiniBars values={revenue.months.length > 0 ? revenue.months.slice(-5).map((m) => m.value) : [0]} />}>
       <Readout
         rows={[
-          { label: 'Monthly Revenue', value: formatMoney(fin.monthlyRevenue) },
+          { label: 'Monthly Revenue', value: formatMoney(fin.monthlyRevenue, currency) },
           { label: 'Collection Rate', value: pctText(fin.collectionRate), tone: 'text-emerald-700' },
-          { label: 'Avg Invoice', value: fin.avgInvoice === null ? '—' : formatMoney(fin.avgInvoice) },
-          { label: 'Outstanding', value: formatMoney(fin.outstanding), tone: 'text-red-600' },
+          { label: 'Avg Invoice', value: fin.avgInvoice === null ? '—' : formatMoney(fin.avgInvoice, currency) },
+          { label: 'Outstanding', value: formatMoney(fin.outstanding, currency), tone: 'text-red-600' },
         ]}
       />
     </Card>,

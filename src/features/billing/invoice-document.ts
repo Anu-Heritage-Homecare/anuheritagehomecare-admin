@@ -24,7 +24,7 @@ function esc(s: string): string {
 
 /** "₦-72,500", as the designs write a reduction. */
 function signed(amount: number): string {
-  return amount < 0 ? formatMoney(-amount).replace('₦', '₦-') : formatMoney(amount)
+  return amount < 0 ? formatMoney(-amount, 'NGN').replace('₦', '₦-') : formatMoney(amount, 'NGN')
 }
 
 export function invoiceDocumentHtml(invoice: LedgerInvoice, account: BillingAccount | undefined): string {
@@ -35,16 +35,16 @@ export function invoiceDocumentHtml(invoice: LedgerInvoice, account: BillingAcco
   const rows = b.lines
     .map(
       (l) => `<tr><td>${esc(l.description)}${multi && l.recipient ? `<span class="sub"> — ${esc(l.recipient)}</span>` : ''}</td>
-<td class="num muted">${l.units}</td><td class="num strong">${formatMoney(l.amount)}</td></tr>`,
+<td class="num muted">${l.units}</td><td class="num strong">${formatMoney(l.amount, 'NGN')}</td></tr>`,
     )
     .join('')
   const totals = [
-    `<tr><td class="muted">Subtotal</td><td class="num strong">${formatMoney(b.subtotal)}</td></tr>`,
+    `<tr><td class="muted">Subtotal</td><td class="num strong">${formatMoney(b.subtotal, 'NGN')}</td></tr>`,
     ...b.adjustments.map(
       (a) =>
         `<tr><td class="muted">${esc(a.label)}</td><td class="num strong${a.amount < 0 ? ' red' : ''}">${signed(a.amount)}</td></tr>`,
     ),
-    `<tr class="total"><td>Total Due</td><td class="num brand">${formatMoney(b.total)}</td></tr>`,
+    `<tr class="total"><td>Total Due</td><td class="num brand">${formatMoney(b.total, 'NGN')}</td></tr>`,
   ].join('')
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${esc(invoice.number)}</title>

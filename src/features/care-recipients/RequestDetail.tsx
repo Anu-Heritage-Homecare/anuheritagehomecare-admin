@@ -286,7 +286,7 @@ export function RequestDetail({
                   : 'List price'}
               </dt>
               <dd className="text-ink font-medium tabular-nums">
-                {formatMoney(fit.estimatedCost)}
+                {formatMoney(fit.estimatedCost, 'NGN')}
               </dd>
             </div>
           </dl>
@@ -303,7 +303,7 @@ export function RequestDetail({
                     {planById[fit.suggested].name}
                   </Link>{' '}
                   covers this rota at{' '}
-                  {formatMoney(planById[fit.suggested].monthlyPrice)} a month.
+                  {formatMoney(planById[fit.suggested].monthlyPrice, 'NGN')} a month.
                 </>
               ) : (
                 'No catalogue plan covers this rota; it needs a bespoke quote.'

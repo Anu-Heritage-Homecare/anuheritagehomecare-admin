@@ -51,7 +51,7 @@ function ReminderForm({
           </div>
           <div>
             <dt className="text-ink-muted text-xs">Amount Due</dt>
-            <dd className="text-ink mt-1 font-bold tabular-nums">{formatMoney(balanceOf(invoice))}</dd>
+            <dd className="text-ink mt-1 font-bold tabular-nums">{formatMoney(balanceOf(invoice), 'NGN')}</dd>
           </div>
           <div>
             <dt className="text-ink-muted text-xs">{late > 0 ? 'Days Overdue' : 'Due In'}</dt>

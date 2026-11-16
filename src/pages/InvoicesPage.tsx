@@ -239,7 +239,7 @@ export function InvoicesPage() {
                     </td>
                     <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">{r.recipient}</td>
                     <td className="text-ink py-3.5 pr-4 text-right font-bold whitespace-nowrap tabular-nums">
-                      {formatMoney(r.amount)}
+                      {formatMoney(r.amount, r.currency)}
                     </td>
                     <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">
                       {r.dueDate ? fmt(r.dueDate) : '—'}

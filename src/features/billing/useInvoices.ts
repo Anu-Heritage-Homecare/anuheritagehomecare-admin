@@ -71,8 +71,9 @@ export interface InvoiceRow {
   billingAccountId: string | null
   account: string
   recipient: string
-  /** Whole currency units, for the NGN formatter. */
+  /** Whole currency units. */
   amount: number
+  currency: string
   dueDate: string | null
   status: StatementStatus
 }
@@ -146,6 +147,7 @@ function toRow(dto: InvoiceRowDto): InvoiceRow {
     account: dto.billingAccountName ?? '—',
     recipient: dto.careRecipientName,
     amount: toUnit(dto.amountMinor),
+    currency: dto.currency,
     dueDate: dto.dueDate,
     status: toStatus(dto.status),
   }

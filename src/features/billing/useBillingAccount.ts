@@ -86,6 +86,7 @@ export interface AccountDetailView {
     preferredMethod: string
   }
   financial: {
+    currency: string
     outstanding: number
     totalBilled: number
     totalPaid: number
@@ -117,6 +118,7 @@ function toDetail(dto: AccountDetailDto): AccountDetailView {
       preferredMethod: dto.summary.preferredMethod ?? 'Not recorded',
     },
     financial: {
+      currency: dto.financial.currency ?? 'NGN',
       outstanding: toUnit(dto.financial.outstandingMinor),
       totalBilled: toUnit(dto.financial.totalBilledMinor),
       totalPaid: toUnit(dto.financial.totalPaidMinor),
@@ -166,6 +168,7 @@ export interface AccountRecipientView {
   relationship: string
   plan: string
   monthly?: number
+  currency: string
   startedAt?: string
   status: RecipientStatus
 }
@@ -185,6 +188,7 @@ function toRecipient(dto: AccountRecipientDto): AccountRecipientView {
     relationship: dto.relationship,
     plan: dto.servicePlan ?? DASH,
     monthly: dto.monthlyCostMinor === null ? undefined : toUnit(dto.monthlyCostMinor),
+    currency: dto.currency ?? 'NGN',
     startedAt: toDay(dto.startDate),
     status: RECIPIENT_STATUS[dto.status] ?? 'new',
   }
@@ -223,6 +227,7 @@ export interface AccountInvoiceView {
   periodStart: string
   periodEnd: string
   amount: number
+  currency: string
   dueDate?: string
   paidAmount: number
   status: 'PAID' | 'AWAITING_PAYMENT' | 'OVERDUE' | 'CANCELLED' | 'WRITTEN_OFF'
@@ -235,6 +240,7 @@ function toAccountInvoice(dto: AccountInvoiceDto): AccountInvoiceView {
     periodStart: dto.periodStart.slice(0, 10),
     periodEnd: dto.periodEnd.slice(0, 10),
     amount: toUnit(dto.amountMinor),
+    currency: dto.currency,
     dueDate: toDay(dto.dueDate),
     paidAmount: toUnit(dto.paidAmountMinor),
     status: dto.status,
@@ -275,6 +281,7 @@ export interface AccountPaymentView {
   reference: string
   invoiceNumber?: string
   amount: number
+  currency: string
   method?: string
   receivedAt: string
   referenceNumber?: string
@@ -288,6 +295,7 @@ function toAccountPayment(dto: AccountPaymentDto): AccountPaymentView {
     reference: dto.reference,
     invoiceNumber: dto.invoiceNumber ?? undefined,
     amount: toUnit(dto.amountMinor),
+    currency: dto.currency,
     method: dto.method ?? undefined,
     receivedAt: dto.receivedAt.slice(0, 10),
     referenceNumber: dto.referenceNumber ?? undefined,

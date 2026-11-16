@@ -193,11 +193,11 @@ export function BillingAccountPage() {
     {
       id: 'outstanding',
       label: 'Outstanding balance',
-      value: formatMoney(account.financial.outstanding),
+      value: formatMoney(account.financial.outstanding, account.financial.currency),
       alert: account.financial.outstanding > 0,
     },
-    { id: 'billed', label: 'Total billed', value: formatMoney(account.financial.totalBilled) },
-    { id: 'paid', label: 'Total paid', value: formatMoney(account.financial.totalPaid) },
+    { id: 'billed', label: 'Total billed', value: formatMoney(account.financial.totalBilled, account.financial.currency) },
+    { id: 'paid', label: 'Total paid', value: formatMoney(account.financial.totalPaid, account.financial.currency) },
     {
       id: 'last',
       label: 'Last payment',
@@ -306,7 +306,7 @@ export function BillingAccountPage() {
                 </Link>
               }
             >
-              <RecentInvoices invoices={account.recentInvoices} />
+              <RecentInvoices invoices={account.recentInvoices} currency={account.financial.currency} />
             </Panel>
           </div>
 
@@ -362,7 +362,13 @@ export function BillingAccountPage() {
   )
 }
 
-function RecentInvoices({ invoices }: { invoices: AccountDetailView['recentInvoices'] }) {
+function RecentInvoices({
+  invoices,
+  currency,
+}: {
+  invoices: AccountDetailView['recentInvoices']
+  currency: string
+}) {
   if (invoices.length === 0)
     return <p className="text-ink-muted px-4 pb-4 text-sm">Nothing billed yet.</p>
   return (
@@ -381,7 +387,7 @@ function RecentInvoices({ invoices }: { invoices: AccountDetailView['recentInvoi
             <tr key={l.number}>
               <td className="text-ink py-3 pr-4 font-semibold whitespace-nowrap">{l.number}</td>
               <td className="text-ink py-3 pr-4 text-right font-semibold whitespace-nowrap tabular-nums">
-                {formatMoney(l.amount)}
+                {formatMoney(l.amount, currency)}
               </td>
               <td className="text-ink-muted py-3 pr-4 whitespace-nowrap">
                 {l.dueDate ? formatDate(l.dueDate) : '—'}
@@ -437,7 +443,7 @@ function RecipientsTab({ accountId }: { accountId: string }) {
                 <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">{row.relationship}</td>
                 <td className="text-ink py-3.5 pr-4 font-medium whitespace-nowrap">{row.plan}</td>
                 <td className="text-ink py-3.5 pr-4 text-right font-semibold whitespace-nowrap tabular-nums">
-                  {row.monthly === undefined ? '—' : `${formatMoney(row.monthly)}/mo`}
+                  {row.monthly === undefined ? '—' : `${formatMoney(row.monthly, row.currency)}/mo`}
                 </td>
                 <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">
                   {row.startedAt ? formatDate(row.startedAt) : 'Not recorded'}
@@ -551,13 +557,13 @@ function InvoicesTab({ accountId }: { accountId: string }) {
                   {formatServicePeriod(l.periodStart, l.periodEnd)}
                 </td>
                 <td className="text-ink px-3 py-3.5 font-semibold whitespace-nowrap tabular-nums">
-                  {formatMoney(l.amount)}
+                  {formatMoney(l.amount, l.currency)}
                 </td>
                 <td className="text-ink-muted px-3 py-3.5 whitespace-nowrap">
                   {l.dueDate ? formatDate(l.dueDate) : '—'}
                 </td>
                 <td className="text-ink-muted px-3 py-3.5 whitespace-nowrap tabular-nums">
-                  {formatMoney(l.paidAmount)}
+                  {formatMoney(l.paidAmount, l.currency)}
                 </td>
                 <td className="px-3 py-3.5">
                   <span className={cn(pill, tonePill[statementStatusTones[l.display]])}>
@@ -665,7 +671,7 @@ function PaymentsTab({ account }: { account: AccountDetailView }) {
                       {p.invoiceNumber ?? '—'}
                     </td>
                     <td className="text-ink px-3 py-3.5 font-semibold whitespace-nowrap tabular-nums">
-                      {formatMoney(p.amount)}
+                      {formatMoney(p.amount, p.currency)}
                     </td>
                     <td className="text-ink-muted px-3 py-3.5 whitespace-nowrap">{p.method ?? '—'}</td>
                     <td className="text-ink-muted px-3 py-3.5 whitespace-nowrap">{formatDate(p.receivedAt)}</td>

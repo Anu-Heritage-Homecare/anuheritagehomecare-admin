@@ -55,8 +55,9 @@ export interface AccountRow {
   contact: string
   phone: string
   recipients: number
-  /** Whole currency units, for the NGN formatter. */
+  /** Whole currency units. */
   outstanding: number
+  currency: string
   lastPaymentAt: string | null
   status: AccountStatus
 }
@@ -115,6 +116,7 @@ function toRow(dto: AccountRowDto): AccountRow {
     phone: dto.phone ?? '—',
     recipients: dto.recipientCount,
     outstanding: toUnit(dto.outstandingMinor),
+    currency: dto.currency ?? 'NGN',
     lastPaymentAt: dto.lastPaymentAt,
     status: toStatus(dto),
   }

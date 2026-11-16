@@ -92,6 +92,7 @@ export interface FinAgingRow {
 }
 
 export interface FinancialReportView {
+  currency: string
   from: string
   to: string
   kpis: FinKpis
@@ -119,6 +120,7 @@ const AGING_META: Record<AgingBucket, { id: string; label: string; tone: FinAgin
 
 function toView(dto: FinancialReportDto): FinancialReportView {
   return {
+    currency: dto.currency,
     from: dto.from.slice(0, 10),
     to: dto.to.slice(0, 10),
     kpis: {

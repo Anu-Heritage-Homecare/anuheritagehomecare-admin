@@ -54,7 +54,7 @@ function csvField(v: string): string {
 /* ------------------------------- the report ------------------------------- */
 
 function Report({ view, filters }: { view: FinancialReportView; filters: ReactNode }) {
-  const { kpis, months, methods, aging } = view
+  const { currency, kpis, months, methods, aging } = view
   const agingTotal = aging.reduce((s, b) => s + b.amount, 0)
   const maxMonth = Math.max(1, ...months.map((m) => m.revenue))
 
@@ -70,7 +70,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
     {
       id: 'billed',
       label: 'Total Billed',
-      value: formatMoney(kpis.totalRevenue),
+      value: formatMoney(kpis.totalRevenue, currency),
       badge:
         kpis.revenueDelta === null
           ? 'No earlier period on record'
@@ -82,7 +82,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
     {
       id: 'collected',
       label: 'Collections',
-      value: formatMoney(kpis.collections),
+      value: formatMoney(kpis.collections, currency),
       badge: kpis.collectionRate === null ? '—' : `${kpis.collectionRate}% collection rate`,
       badgeTone: 'neutral',
       icon: Star,
@@ -91,7 +91,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
     {
       id: 'outstanding',
       label: 'Outstanding Balance',
-      value: formatMoney(kpis.outstanding),
+      value: formatMoney(kpis.outstanding, currency),
       badge: `${kpis.pendingCount} open · as of today`,
       badgeTone: 'warn',
       icon: Download,
@@ -100,7 +100,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
     {
       id: 'writeoffs',
       label: 'Write-offs',
-      value: formatMoney(kpis.writeOffs),
+      value: formatMoney(kpis.writeOffs, currency),
       badge: kpis.lossRate === null ? '—' : `${kpis.lossRate}% of billed`,
       badgeTone: kpis.writeOffs > 0 ? 'bad' : 'neutral',
       icon: TriangleAlert,
@@ -208,7 +208,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
                 {months.map((m) => (
                   <div key={m.id} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end">
                     <span className="text-ink mb-1.5 text-[0.6875rem] font-semibold tabular-nums whitespace-nowrap">
-                      {formatCompact(m.revenue)}
+                      {formatCompact(m.revenue, currency)}
                     </span>
                     <div
                       className="bg-brand-600 w-full max-w-11 rounded-t-md"
@@ -224,7 +224,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
                   {months.map((m) => (
                     <tr key={m.id}>
                       <th scope="row">{m.label}</th>
-                      <td>{formatMoney(m.revenue)}</td>
+                      <td>{formatMoney(m.revenue, currency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -245,10 +245,10 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
             <Donut
               segments={methodSegments}
               centreLabel="Collected"
-              centreValue={formatCompact(kpis.collections)}
+              centreValue={formatCompact(kpis.collections, currency)}
               caption="Collections by method"
               columns={['Method', 'Amount', 'Share']}
-              formatValue={formatMoney}
+              formatValue={(v) => formatMoney(v, currency)}
             />
           )}
         </Panel>
@@ -284,7 +284,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
                     </div>
                   </td>
                   <td className="text-ink py-3.5 pr-4 text-right font-semibold whitespace-nowrap tabular-nums">
-                    {formatMoney(b.amount)}
+                    {formatMoney(b.amount, currency)}
                   </td>
                   <td className="text-ink py-3.5 text-right tabular-nums">{b.share}%</td>
                 </tr>
@@ -295,7 +295,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
                 <td className="text-ink py-3 pr-4 font-semibold">Total</td>
                 <td className="text-ink-muted py-3 pr-4">{aging.reduce((s, b) => s + b.count, 0)} items</td>
                 <td />
-                <td className="text-ink py-3 pr-4 text-right font-bold tabular-nums">{formatMoney(agingTotal)}</td>
+                <td className="text-ink py-3 pr-4 text-right font-bold tabular-nums">{formatMoney(agingTotal, currency)}</td>
                 <td className="text-ink py-3 text-right tabular-nums">{agingTotal ? '100%' : '—'}</td>
               </tr>
             </tfoot>

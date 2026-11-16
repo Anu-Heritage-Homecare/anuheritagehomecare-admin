@@ -38,7 +38,7 @@ export function channelTargets(account: BillingAccount | undefined): Record<Chan
 const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 export function reminderMessage(invoice: LedgerInvoice, account: BillingAccount | undefined, today = TODAY) {
-  const amount = formatMoney(balanceOf(invoice, today))
+  const amount = formatMoney(balanceOf(invoice, today), 'NGN')
   const late = daysOverdue(invoice, today)
   const when =
     late > 0

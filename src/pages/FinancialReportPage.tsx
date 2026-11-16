@@ -66,13 +66,13 @@ const rangeIds = Object.keys(rangeLabels) as RangeId[]
 /* ------------------------------- the report ------------------------------- */
 
 function Report({ view, filters }: { view: FinancialReportView; filters: ReactNode }) {
-  const { kpis, months } = view
+  const { currency, kpis, months } = view
   const latest = months.length > 0 ? months[months.length - 1] : null
 
   const tiles: { label: string; value: string; badge: string; tone: keyof typeof pill }[] = [
     {
       label: 'Total Revenue',
-      value: formatMoney(kpis.totalRevenue),
+      value: formatMoney(kpis.totalRevenue, currency),
       badge:
         kpis.revenueDelta === null
           ? 'No earlier period on record'
@@ -81,12 +81,12 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
     },
     {
       label: 'Monthly Revenue',
-      value: latest ? formatMoney(latest.revenue) : '—',
+      value: latest ? formatMoney(latest.revenue, currency) : '—',
       badge: latest ? latest.label.split(' ')[0] : 'No complete month',
       tone: 'green',
     },
     { label: 'Collection Rate', value: pctText(kpis.collectionRate), badge: `${kpis.pendingCount} pending`, tone: 'green' },
-    { label: 'Outstanding Balance', value: formatMoney(kpis.outstanding), badge: `${kpis.pendingCount} open`, tone: 'amber' },
+    { label: 'Outstanding Balance', value: formatMoney(kpis.outstanding, currency), badge: `${kpis.pendingCount} open`, tone: 'amber' },
     {
       label: 'Avg Invoice Value',
       value: '—',
@@ -180,8 +180,8 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
         ) : (
           <LineChart
             points={months.map((m) => ({ label: m.short, value: m.revenue }))}
-            formatTick={formatCompact}
-            formatValue={formatMoney}
+            formatTick={(v) => formatCompact(v, currency)}
+            formatValue={(v) => formatMoney(v, currency)}
             caption="Revenue by month"
             columns={['Month', 'Revenue']}
           />
@@ -213,7 +213,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
         aside={
           <p className="text-ink-muted flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <span>
-              Total Outstanding: <span className="text-ink font-semibold tabular-nums">{formatMoney(kpis.outstanding)}</span>
+              Total Outstanding: <span className="text-ink font-semibold tabular-nums">{formatMoney(kpis.outstanding, currency)}</span>
             </span>
           </p>
         }
@@ -244,7 +244,7 @@ function Report({ view, filters }: { view: FinancialReportView; filters: ReactNo
                   <th scope="row" className="text-ink py-3 pr-3 pl-5 font-semibold whitespace-nowrap sm:pl-6">
                     {m.label}
                   </th>
-                  <td className="text-ink-muted px-3 py-3 tabular-nums">{formatMoney(m.revenue)}</td>
+                  <td className="text-ink-muted px-3 py-3 tabular-nums">{formatMoney(m.revenue, currency)}</td>
                   <td className="text-ink-subtle px-3 py-3 tabular-nums">—</td>
                   <td className="text-ink-subtle px-3 py-3 tabular-nums">—</td>
                   <td className="py-3 pr-5 pl-3 text-right sm:pr-6">

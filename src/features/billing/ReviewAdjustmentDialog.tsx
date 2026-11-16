@@ -13,7 +13,7 @@ import type { Adjustment } from './adjustments'
 function signedAmount(a: Adjustment): { text: string; off: boolean } {
   const off = a.kind !== 'adjustment' || a.direction === 'decrease'
   return {
-    text: off ? formatMoney(a.amount).replace('₦', '₦-') : `+${formatMoney(a.amount)}`,
+    text: off ? formatMoney(a.amount, 'NGN').replace('₦', '₦-') : `+${formatMoney(a.amount, 'NGN')}`,
     off,
   }
 }

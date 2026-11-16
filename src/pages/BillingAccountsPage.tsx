@@ -266,7 +266,7 @@ export function BillingAccountsPage() {
                           a.outstanding > 0 ? 'text-ink font-semibold' : 'text-ink-muted',
                         )}
                       >
-                        {formatMoney(a.outstanding)}
+                        {formatMoney(a.outstanding, a.currency)}
                       </td>
                       <td className="text-ink-muted py-3.5 pr-4 whitespace-nowrap">
                         {a.lastPaymentAt ? formatDate(a.lastPaymentAt.slice(0, 10)) : '—'}
