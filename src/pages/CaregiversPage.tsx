@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { Loader2, Plus, TriangleAlert } from 'lucide-react'
 import {
@@ -26,6 +26,7 @@ import {
   useCaregiverProfile,
   useCaregiverRoster,
 } from '@/features/caregivers/useCaregivers'
+import { AddCaregiverDrawer } from '@/features/caregivers/AddCaregiverDrawer'
 import { OverviewTab } from '@/features/caregivers/StaffTabs'
 import { NotesTab } from '@/features/caregivers/NotesTab'
 import { DocumentsTab } from '@/features/caregivers/DocumentsTab'
@@ -65,6 +66,7 @@ function isStatus(value: string | null): StaffStatus | 'all' {
 export function CaregiversPage() {
   const { caregiverId, tab } = useParams()
   const [params, setParams] = useSearchParams()
+  const [adding, setAdding] = useState(false)
 
   const query = params.get('q') ?? ''
   const status = isStatus(params.get('status'))
@@ -177,12 +179,15 @@ export function CaregiversPage() {
         </div>
         <button
           type="button"
+          onClick={() => setAdding(true)}
           className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
         >
           <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Add caregiver
         </button>
       </header>
+
+      <AddCaregiverDrawer open={adding} onClose={() => setAdding(false)} />
 
       <section aria-labelledby="roster-kpis">
         <h2 id="roster-kpis" className="sr-only">
