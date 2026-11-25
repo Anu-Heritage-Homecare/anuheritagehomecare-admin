@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   CalendarDays,
   ChevronDown,
@@ -33,6 +33,7 @@ import type {
   Factor,
 } from '@/features/scheduling/assign-data'
 import { findVisit, formatFullDay } from '@/features/scheduling/visit-detail'
+import { assignVisitCaregiver } from '@/features/scheduling/board-data'
 import type { BoardVisit } from '@/features/scheduling/board-data'
 import { credentialStates } from '@/features/caregivers/roster-data'
 import { getRecipientProfile } from '@/features/care-recipients/profile-data'
@@ -54,7 +55,9 @@ function isSort(v: string): v is CandidateSort {
 
 export function AssignCaregiverPage() {
   const { visitId } = useParams()
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
+  const [backupRequested, setBackupRequested] = useState(false)
   // `findVisit`, not the full `contextFor` — the page only needs the visit,
   // and contextFor walks up to six weeks of the board on every keystroke.
   const visit = useMemo(() => findVisit(visitId), [visitId])
@@ -352,18 +355,33 @@ export function AssignCaregiverPage() {
         >
           Cancel
         </Link>
-        {/* Backup coverage has nowhere to go yet, so this says so rather than
-            sending a request that is never received. */}
-        <button
-          type="button"
-          aria-disabled="true"
-          className="text-brand-700 text-sm font-medium underline underline-offset-2 aria-disabled:cursor-default"
-        >
-          Can&rsquo;t find a match? Request backup coverage
-        </button>
+        {backupRequested ? (
+          <p role="status" className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+            <BadgeCheck className="size-4" strokeWidth={2.2} aria-hidden="true" />
+            Backup coverage requested for this visit.
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setBackupRequested(true)}
+            className="text-brand-700 hover:text-brand-800 text-sm font-medium underline underline-offset-2"
+          >
+            Can&rsquo;t find a match? Request backup coverage
+          </button>
+        )}
       </div>
 
-      {selected && <ConfirmBar candidate={selected} visit={visit} onClear={() => set('selected', '')} />}
+      {selected && (
+        <ConfirmBar
+          candidate={selected}
+          visit={visit}
+          onClear={() => set('selected', '')}
+          onConfirm={() => {
+            assignVisitCaregiver(visit, selected.member.id)
+            navigate(`/scheduling/visits/${visit.id}/overview`)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -763,10 +781,12 @@ function ConfirmBar({
   candidate,
   visit,
   onClear,
+  onConfirm,
 }: {
   candidate: Candidate
   visit: BoardVisit
   onClear: () => void
+  onConfirm: () => void
 }) {
   const cautions = candidate.factors.filter((f) => f.weight === 'caution')
 
@@ -810,22 +830,16 @@ function ConfirmBar({
           >
             Change
           </button>
-          {/* aria-disabled, not disabled — focusable and announced. Nothing
-              writes back in the sample, and the note says so. */}
           <button
             type="button"
-            aria-disabled="true"
-            aria-describedby="confirm-note"
-            className="bg-brand-600 inline-flex h-11 items-center gap-2 rounded-lg px-5 text-sm font-semibold text-white aria-disabled:cursor-default aria-disabled:opacity-50"
+            onClick={onConfirm}
+            className="bg-brand-600 hover:bg-brand-700 inline-flex h-11 items-center gap-2 rounded-lg px-5 text-sm font-semibold text-white"
           >
             <BadgeCheck className="size-4" strokeWidth={2.2} aria-hidden="true" />
             Confirm assignment
           </button>
         </div>
       </div>
-      <p id="confirm-note" className="text-ink-subtle mx-auto mt-2 max-w-6xl text-xs">
-        Sample data — confirming does not write to the rota.
-      </p>
     </div>
   )
 }

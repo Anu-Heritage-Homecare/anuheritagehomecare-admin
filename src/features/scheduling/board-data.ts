@@ -20,8 +20,31 @@ import type { ScheduledVisit } from '@/features/caregivers/schedule-data'
 import type { Weekday } from '@/features/caregivers/staff'
 import { NOW, TODAY } from '@/lib/today'
 import type { Priority, Tone, VisitStatus } from '@/types'
+import {
+  assignVisitCaregiver,
+  assignedCaregiverId,
+  cancelVisit,
+  editVisit,
+  isVisitCancelled,
+  onVisitWrite,
+  useBoardRevision,
+  visitCancelReason,
+  visitEdit,
+  visitMove,
+  type VisitEdit,
+} from './visit-writes'
 
 export { NOW, TODAY, addDays, dayOf, formatTime, formatWeekRange, weekStart }
+export {
+  assignVisitCaregiver,
+  cancelVisit,
+  editVisit,
+  isVisitCancelled,
+  useBoardRevision,
+  visitCancelReason,
+  visitEdit,
+}
+export type { VisitEdit }
 
 /* ---------------------------------- types --------------------------------- */
 
@@ -99,27 +122,32 @@ export function unassignedOn(date: string): BoardVisit[] {
     .filter((slot) => slot.date === date)
     .map((slot) => {
       const recipient = recipients.find((r) => r.id === slot.recipientId)!
-      return {
+      const end = endOf(slot.start, slot.durationHours)
+      // Assigned from the Assign Caregiver page: it leaves the unassigned queue
+      // and joins the board under its new caregiver.
+      const assignedTo = visitMove(slot.id)?.toCaregiverId ?? assignedCaregiverId(slot.id)
+      const caregiver = assignedTo ? staffMembers.find((m) => m.id === assignedTo) : undefined
+      return applyWrites({
         id: slot.id,
         date: slot.date,
         day: dayOf(slot.date),
         start: slot.start,
-        end: endOf(slot.start, slot.durationHours),
+        end,
         durationHours: slot.durationHours,
         recipientId: slot.recipientId,
         recipientName: recipient.name,
         type: slot.type,
-        status: 'unassigned' as VisitStatus,
+        status: caregiver ? liveStatus(slot.date, slot.start, end) : ('unassigned' as VisitStatus),
         outsideAvailability: false,
         logged: false,
         clockIn: null,
         clockOut: null,
         overnight: false,
-        caregiverId: null,
-        caregiverName: null,
+        caregiverId: caregiver?.id ?? null,
+        caregiverName: caregiver?.name ?? null,
         priority: recipient.priority,
         recipientStatus: recipient.status,
-      }
+      })
     })
 }
 
@@ -137,6 +165,36 @@ export function addUnassignedVisit(slot: Omit<UnassignedSlot, 'id'>): string {
   // That day's board was memoised without it.
   boardCache.delete(slot.date)
   return id
+}
+
+/* ------------------------------- derived ---------------------------------- */
+
+/** Where a visit stands right now, for a slot that has just been given a caregiver. */
+function liveStatus(date: string, start: string, end: string): VisitStatus {
+  if (date < TODAY) return 'completed'
+  if (date > TODAY) return 'upcoming'
+  if (NOW < start) return 'upcoming'
+  if (NOW >= end) return 'completed'
+  return 'in-progress'
+}
+
+/** Applies this session's edits and cancellation to a built visit. */
+function applyWrites(v: BoardVisit): BoardVisit {
+  const edit = visitEdit(v.id)
+  let out = v
+  if (edit) {
+    const start = edit.start ?? out.start
+    const durationHours = edit.durationHours ?? out.durationHours
+    out = {
+      ...out,
+      type: edit.type ?? out.type,
+      start,
+      durationHours,
+      end: endOf(start, durationHours),
+    }
+  }
+  if (isVisitCancelled(v.id)) out = { ...out, status: 'cancelled' as VisitStatus }
+  return out
 }
 
 export function unassignedReason(id: string): string {
@@ -161,6 +219,9 @@ export function allUnassigned(): BoardVisit[] {
  */
 const boardCache = new Map<string, BoardVisit[]>()
 
+// A write to the visit store invalidates every memoised day.
+onVisitWrite(() => boardCache.clear())
+
 /** Memoised: the fixture is static, and the week view asks fourteen times. */
 export function boardOn(date: string): BoardVisit[] {
   const cached = boardCache.get(date)
@@ -182,10 +243,12 @@ function buildBoard(date: string): BoardVisit[] {
         return [
           {
             ...visit,
-            // Namespaced: every rota restarts its slot ids at "r1", so five
-            // caregivers produced five rows sharing one React key — and two
-            // conflicts sharing one id, of which only the last survived.
-            id: `${member.id}-${visit.id}`,
+            // A reassigned visit carries its own board id from the move, so it
+            // is found under its original key. A normal one is namespaced:
+            // every rota restarts its slot ids at "r1", and five caregivers
+            // otherwise shared one React key — and one id, of which only the
+            // last row survived.
+            id: visit.boardId ?? `${member.id}-${visit.id}`,
             caregiverId: member.id,
             caregiverName: member.name,
             priority: recipient.priority,
@@ -195,7 +258,8 @@ function buildBoard(date: string): BoardVisit[] {
       }),
   )
 
-  return [...assigned, ...unassignedOn(date)].sort(
+  // unassignedOn already applies writes; apply to the assigned side here.
+  return [...assigned.map(applyWrites), ...unassignedOn(date)].sort(
     (a, b) => a.start.localeCompare(b.start) || a.recipientName.localeCompare(b.recipientName),
   )
 }

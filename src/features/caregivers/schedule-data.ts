@@ -5,6 +5,7 @@ import { staffMembers, weekdays } from './staff'
 import type { AvailabilityWindow, StaffMember, Weekday } from './staff'
 import { NOW, TODAY } from '@/lib/today'
 import type { VisitStatus } from '@/types'
+import { visitMove, visitMoves } from '@/features/scheduling/visit-writes'
 
 export { NOW, TODAY, weekdays }
 
@@ -53,6 +54,12 @@ export interface ScheduledVisit {
   clockOut: string | null
   /** Set when the visit is in the log but not on any recurring slot. */
   offRota?: boolean
+  /**
+   * The id this visit takes on the org board. A reassigned visit keeps its
+   * original board id here so the board and Visit Details still find it after
+   * it changes hands; a normal visit leaves it unset and is namespaced there.
+   */
+  boardId?: string
   /** True when the shift runs past midnight; clock times then wrap. */
   overnight: boolean
 }
@@ -374,7 +381,42 @@ export function scheduleFor(
     }
   }
 
-  return visits.sort(
+  // A reassignment shows on both sides at once: the losing caregiver drops the
+  // visit, the gaining one picks it up from the move's snapshot.
+  const mine = visits.filter((v) => !visitMove(`${member.id}-${v.id}`))
+
+  for (const { visitId, move } of visitMoves()) {
+    if (move.toCaregiverId !== member.id) continue
+    if (!weekDates(start).includes(move.date)) continue
+    const { end, overnight } = addHours(move.start, move.durationHours)
+    const day = dayOf(move.date)
+    mine.push({
+      id: `moved-${visitId}`,
+      boardId: visitId,
+      date: move.date,
+      day,
+      start: move.start,
+      end,
+      durationHours: move.durationHours,
+      recipientId: move.recipientId,
+      recipientName: move.recipientName,
+      type: move.type,
+      status: statusFor(move.date, today, move.start, end, NOW, overnight),
+      logged: false,
+      clockIn: null,
+      clockOut: null,
+      overnight,
+      outsideAvailability: !withinAvailability(
+        member.availability,
+        day,
+        move.start,
+        end,
+        overnight,
+      ),
+    })
+  }
+
+  return mine.sort(
     (a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start),
   )
 }

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Download, Plus } from 'lucide-react'
 import {
   PAGE_SIZE,
@@ -43,7 +44,17 @@ export function CareRecipientsPage() {
   const [filter, setFilter] = useState<DirectoryFilter>('all')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
-  const [adding, setAdding] = useState(false)
+  const [params, setParams] = useSearchParams()
+  // Opened straight from the dashboard's "Register Care Recipient" tile.
+  const [adding, setAdding] = useState(() => params.get('new') === '1')
+
+  // Strip the one-shot flag so a refresh or Back does not reopen the drawer.
+  useEffect(() => {
+    if (params.get('new') !== '1') return
+    const next = new URLSearchParams(params)
+    next.delete('new')
+    setParams(next, { replace: true })
+  }, [params, setParams])
   // A snapshot of the shared list, replaced when a recipient is added.
   const [all, setAll] = useState(recipients)
 

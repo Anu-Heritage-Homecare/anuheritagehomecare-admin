@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react'
-import { MoreHorizontal, Search } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Search } from 'lucide-react'
 import { visits } from './data'
+import type { Visit } from './data'
 import type { VisitStatus } from '@/types'
+import { TODAY } from '@/lib/today'
 import {
   PriorityLabel,
   VisitStatusBadge,
 } from '@/components/ui/StatusBadge'
+import { DropdownMenu } from '@/components/ui/DropdownMenu'
+import type { MenuItem } from '@/components/ui/DropdownMenu'
 import { cn } from '@/lib/cn'
 
 type Filter = 'all' | 'in-progress' | 'upcoming' | 'completed'
@@ -28,6 +33,7 @@ const matchesFilter: Record<Filter, (s: VisitStatus) => boolean> = {
 export function TodaysSchedule() {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
+  const navigate = useNavigate()
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -40,6 +46,56 @@ export function TodaysSchedule() {
         .includes(q)
     })
   }, [filter, query])
+
+  /*
+   * The dashboard row names a recipient and a caregiver, not an id, so an action
+   * resolves the real visit on today's board before it routes. The scheduling
+   * module is loaded only when an action is taken — the dashboard sits in the
+   * entry chunk and the board does not — the same deferral the alerts use. When
+   * today's board has no such visit, the row still lands somewhere sensible
+   * rather than nowhere.
+   */
+  async function resolve(v: Visit) {
+    const { boardOn } = await import('@/features/scheduling/board-data')
+    return boardOn(TODAY).find(
+      (b) => b.recipientName === v.recipient && (b.caregiverName ?? null) === v.caregiver,
+    )
+  }
+
+  async function openDetails(v: Visit) {
+    const visit = await resolve(v)
+    navigate(visit ? `/scheduling/visits/${visit.id}/overview` : '/scheduling')
+  }
+  async function openRecipient(v: Visit) {
+    const visit = await resolve(v)
+    navigate(visit ? `/care-recipients/${visit.recipientId}` : '/care-recipients')
+  }
+  async function openCaregiver(v: Visit) {
+    const visit = await resolve(v)
+    navigate(visit?.caregiverId ? `/caregivers/${visit.caregiverId}` : '/caregivers')
+  }
+  async function openAssign(v: Visit) {
+    const visit = await resolve(v)
+    navigate(visit ? `/scheduling/visits/${visit.id}/assign` : '/scheduling')
+  }
+
+  /** Actions that make sense for the row as drawn: details and recipient always,
+   *  then view-and-reassign when a caregiver is on it, or assign when none is. */
+  function menuItems(v: Visit): MenuItem[] {
+    const items: MenuItem[] = [
+      { id: 'details', label: 'View visit details', onSelect: () => openDetails(v) },
+      { id: 'recipient', label: 'View care recipient', onSelect: () => openRecipient(v) },
+    ]
+    if (v.caregiver) {
+      items.push(
+        { id: 'caregiver', label: 'View caregiver', onSelect: () => openCaregiver(v) },
+        { id: 'reassign', label: 'Reassign caregiver', onSelect: () => openAssign(v) },
+      )
+    } else {
+      items.push({ id: 'assign', label: 'Assign caregiver', onSelect: () => openAssign(v) })
+    }
+    return items
+  }
 
   return (
     <section aria-labelledby="todays-schedule">
@@ -136,13 +192,12 @@ export function TodaysSchedule() {
                     <PriorityLabel priority={v.priority} />
                   </td>
                   <td className="px-3 py-3.5 lg:px-4 text-right">
-                    <button
-                      type="button"
-                      aria-label={`Actions for ${v.recipient}`}
-                      className="text-ink-subtle hover:bg-sunken hover:text-ink grid size-9 place-items-center rounded-lg"
-                    >
-                      <MoreHorizontal className="size-4.5" />
-                    </button>
+                    <div className="flex justify-end">
+                      <DropdownMenu
+                        label={`Actions for ${v.recipient}`}
+                        items={menuItems(v)}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -161,7 +216,13 @@ export function TodaysSchedule() {
                     {v.time} · {v.type}
                   </p>
                 </div>
-                <VisitStatusBadge status={v.status} />
+                <div className="flex shrink-0 items-center gap-1">
+                  <VisitStatusBadge status={v.status} />
+                  <DropdownMenu
+                    label={`Actions for ${v.recipient}`}
+                    items={menuItems(v)}
+                  />
+                </div>
               </div>
 
               <dl className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

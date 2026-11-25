@@ -17,10 +17,12 @@ import type {
   RuleId,
   ScheduleSettings,
 } from '@/features/scheduling/settings-data'
+import { holidayPolicyLabels } from '@/features/scheduling/settings-data'
 import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
+import { Drawer } from '@/components/ui/Drawer'
 
 const dayNames: Record<string, string> = {
   Mon: 'Monday',
@@ -140,6 +142,7 @@ export function ScheduleSettingsPage() {
   const [saved, setSaved] = useState<ScheduleSettings>(initial)
   const [draft, setDraft] = useState<ScheduleSettings>(initial)
   const [savedAt, setSavedAt] = useState<string | null>(null)
+  const [addingHoliday, setAddingHoliday] = useState(false)
 
   const types = serviceDurations.map((d) => d.type)
   const dirty = isDirty(draft, saved)
@@ -518,15 +521,25 @@ export function ScheduleSettingsPage() {
               ))}
             </ul>
 
-            {/* Nothing adds a holiday yet, so it says so rather than doing nothing. */}
             <button
               type="button"
-              aria-disabled="true"
-              className="text-brand-600 mt-4 inline-flex items-center gap-2 px-1 text-sm font-medium aria-disabled:cursor-default"
+              onClick={() => setAddingHoliday(true)}
+              className="text-brand-600 hover:text-brand-700 mt-4 inline-flex items-center gap-2 px-1 text-sm font-medium"
             >
               <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
               Add Holiday
             </button>
+
+            <Drawer open={addingHoliday} onClose={() => setAddingHoliday(false)} title="Add holiday" placement="center">
+              <AddHolidayForm
+                existing={draft.holidays}
+                onAdd={(holiday) => {
+                  patch({ holidays: [...draft.holidays, holiday] })
+                  setAddingHoliday(false)
+                }}
+                onCancel={() => setAddingHoliday(false)}
+              />
+            </Drawer>
           </section>
         </div>
       </div>
@@ -640,5 +653,87 @@ function ImpactNote({
         {impact.count > impact.examples.length && ' and others'}.
       </span>
     </p>
+  )
+}
+
+const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'] as const
+const holidayPolicies: HolidayPolicy[] = ['normal', 'emergency', 'closed']
+
+let holidaySeq = 0
+
+function AddHolidayForm({
+  existing,
+  onAdd,
+  onCancel,
+}: {
+  existing: Holiday[]
+  onAdd: (holiday: Holiday) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState('')
+  const [month, setMonth] = useState(1)
+  const [day, setDay] = useState(1)
+  const [policy, setPolicy] = useState<HolidayPolicy>('emergency')
+  const daysInMonth = new Date(Date.UTC(2026, month, 0)).getUTCDate()
+  const safeDay = Math.min(day, daysInMonth)
+  const clash = existing.some((h) => h.name.toLowerCase() === name.trim().toLowerCase())
+  const valid = name.trim() !== '' && !clash
+
+  return (
+    <form
+      className="space-y-4 p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid) return
+        holidaySeq += 1
+        onAdd({
+          id: `custom-${holidaySeq}`,
+          name: name.trim(),
+          policy,
+          rule: { kind: 'fixed', month, day: safeDay },
+        })
+      }}
+    >
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Holiday name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Founders' Day" className={cn(fieldControl, 'mt-1.5')} />
+        {clash && <span className="mt-1 block text-xs text-red-700">A holiday with this name already exists.</span>}
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Month</span>
+          <SelectBox value={String(month)} onChange={(e) => setMonth(Number(e.target.value))} className={cn(fieldControl, 'mt-1.5')}>
+            {monthNames.map((m, i) => (
+              <option key={m} value={i + 1}>{m}</option>
+            ))}
+          </SelectBox>
+        </label>
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Day</span>
+          <SelectBox value={String(safeDay)} onChange={(e) => setDay(Number(e.target.value))} className={cn(fieldControl, 'mt-1.5')}>
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </SelectBox>
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Policy</span>
+        <SelectBox value={policy} onChange={(e) => setPolicy(e.target.value as HolidayPolicy)} className={cn(fieldControl, 'mt-1.5')}>
+          {holidayPolicies.map((pp) => (
+            <option key={pp} value={pp}>{holidayPolicyLabels[pp]}</option>
+          ))}
+        </SelectBox>
+      </label>
+      <p className="text-ink-subtle text-xs">Added to the draft; use Save Changes to keep it.</p>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+          Cancel
+        </button>
+        <button type="submit" disabled={!valid} className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
+          Add Holiday
+        </button>
+      </div>
+    </form>
   )
 }

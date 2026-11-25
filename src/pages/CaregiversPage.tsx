@@ -18,6 +18,7 @@ import {
   sortStaff,
   staffMembers,
   statusLabels,
+  useStaffRevision,
   statusTones,
 } from '@/features/caregivers/roster-data'
 import type {
@@ -62,6 +63,8 @@ function isStatus(value: string | null): StaffStatus | 'all' {
 }
 
 export function CaregiversPage() {
+  // Re-render when a caregiver is added this session.
+  const staffRev = useStaffRevision()
   const { caregiverId, tab } = useParams()
   const [params, setParams] = useSearchParams()
 
@@ -80,6 +83,7 @@ export function CaregiversPage() {
   }
 
   const filtered = useMemo(() => {
+    void staffRev
     const needle = query.trim().toLowerCase()
     const matched = staffMembers.filter((s) => {
       if (status !== 'all' && s.status !== status) return false
@@ -93,7 +97,7 @@ export function CaregiversPage() {
       )
     })
     return sortStaff(matched, sort)
-  }, [query, status, sort])
+  }, [query, status, sort, staffRev])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / ROSTER_PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
@@ -173,13 +177,13 @@ export function CaregiversPage() {
             work on, so both cover whatever the visit log holds.
           </p>
         </div>
-        <button
-          type="button"
+        <Link
+          to="/caregivers/new"
           className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
         >
           <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Add caregiver
-        </button>
+        </Link>
       </header>
 
       <section aria-labelledby="roster-kpis">

@@ -72,6 +72,8 @@ export interface QuickAction {
   id: string
   label: string
   icon: LucideIcon
+  /** Where the tile goes — the screen where that action is actually done. */
+  to: string
   /**
    * Wayfinding, not status. These six are a launcher — the colour is there so
    * the eye can find "Broadcast Announcement" without reading all six labels,
@@ -288,12 +290,14 @@ export const activity: ActivityEntry[] = [
 ]
 
 export const quickActions: QuickAction[] = [
-  { id: 'q1', label: 'Assign Caregiver', icon: UserPlus, tone: 'blue' },
-  { id: 'q2', label: 'Schedule Visit', icon: CalendarPlus, tone: 'blue' },
-  { id: 'q3', label: 'Create Care Plan', icon: FilePlus, tone: 'green' },
-  { id: 'q4', label: 'Register Care Recipient', icon: UserRound, tone: 'purple' },
-  { id: 'q5', label: 'Broadcast Announcement', icon: Megaphone, tone: 'amber' },
-  { id: 'q6', label: 'Generate Report', icon: BarChart3, tone: 'slate' },
+  // The board's unassigned queue is where a caregiver is actually assigned.
+  { id: 'q1', label: 'Assign Caregiver', icon: UserPlus, tone: 'blue', to: '/scheduling' },
+  { id: 'q2', label: 'Schedule Visit', icon: CalendarPlus, tone: 'blue', to: '/scheduling/visits/new' },
+  // A plan belongs to a recipient; the directory is where you pick whose.
+  { id: 'q3', label: 'Create Care Plan', icon: FilePlus, tone: 'green', to: '/care-recipients' },
+  { id: 'q4', label: 'Register Care Recipient', icon: UserRound, tone: 'purple', to: '/care-recipients?new=1' },
+  { id: 'q5', label: 'Broadcast Announcement', icon: Megaphone, tone: 'amber', to: '/messages?folder=announcements' },
+  { id: 'q6', label: 'Generate Report', icon: BarChart3, tone: 'slate', to: '/reports' },
 ]
 
 export const metrics: Metric[] = [

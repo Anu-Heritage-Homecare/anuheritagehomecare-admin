@@ -86,6 +86,37 @@ function isOutside(note: CareNoteEntry, visit: BoardVisit): boolean {
   return at < start || at >= end
 }
 
+/* --------------------------- notes added this session --------------------- */
+
+interface AddedNote {
+  id: string
+  visitId: string
+  at: string
+  author: string
+  authorRole: string
+  body: string
+  kind: VisitNoteKind
+}
+const addedNotes: AddedNote[] = []
+let addedSeq = 0
+
+/** A note written on a visit from the Visit Details screen. Held in memory. */
+export function addVisitNote(
+  visitId: string,
+  note: { author: string; authorRole: string; body: string; kind?: VisitNoteKind },
+): void {
+  addedSeq += 1
+  addedNotes.push({
+    id: `added-${addedSeq}`,
+    visitId,
+    at: new Date().toISOString(),
+    author: note.author,
+    authorRole: note.authorRole,
+    body: note.body,
+    kind: note.kind ?? 'team',
+  })
+}
+
 export function visitNotesFor(
   visit: BoardVisit,
   notes: CareNoteEntry[],
@@ -131,6 +162,21 @@ export function visitNotesFor(
         entry.kind === 'dose'
           ? `${visit.recipientName}’s medication plan`
           : 'The visit record',
+    })
+  }
+
+  for (const note of addedNotes) {
+    if (note.visitId !== visit.id) continue
+    out.push({
+      id: note.id,
+      kind: note.kind,
+      at: note.at,
+      isInstant: true,
+      author: note.author,
+      authorRole: note.authorRole,
+      body: note.body,
+      authored: true,
+      source: 'Added on this visit',
     })
   }
 

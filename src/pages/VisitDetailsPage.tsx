@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
@@ -49,7 +49,11 @@ import type { CareNoteEntry } from '@/features/care-recipients/notes-data'
 import type { DoseState } from '@/features/care-recipients/medications-data'
 import {
   boardOn,
+  cancelVisit,
+  editVisit,
   isUnlogged,
+  useBoardRevision,
+  visitEdit,
 } from '@/features/scheduling/board-data'
 import type { BoardVisit } from '@/features/scheduling/board-data'
 import { formatNoteTime, noteCategoryLabels } from '@/features/care-recipients/notes-data'
@@ -73,6 +77,12 @@ import {
   placeOfRecipient,
   travelMiles,
 } from '@/features/monitoring/locations-data'
+import { addVisitNote } from '@/features/scheduling/visit-notes'
+import { serviceTypes } from '@/features/scheduling/settings-data'
+import { Drawer } from '@/components/ui/Drawer'
+import { SelectBox } from '@/components/ui/SelectBox'
+import { fieldControl } from '@/lib/field-classes'
+import { SIGNED_IN, SIGNED_IN_ROLE } from '@/lib/session'
 import { Panel } from '@/components/ui/Panel'
 import { Avatar } from '@/components/ui/Avatar'
 import { PriorityBadge, VisitStatusBadge } from '@/components/ui/StatusBadge'
@@ -105,6 +115,8 @@ function isTab(value: string | undefined): value is TabSlug {
 export function VisitDetailsPage() {
   const { visitId, tab } = useParams()
   const [params] = useSearchParams()
+  useBoardRevision()
+  const [dialog, setDialog] = useState<'edit' | 'cancel' | null>(null)
   const context = contextFor(visitId)
 
   const search = params.toString()
@@ -163,12 +175,12 @@ export function VisitDetailsPage() {
             <HeaderStatus visit={visit} large />
           </div>
 
-          {/* aria-disabled, not disabled: the buttons stay focusable and
-              announce their state. Edit and Cancel are not wired up yet. */}
           <div className="flex flex-wrap gap-2">
-            <button type="button" aria-disabled="true" className={secondaryBtn}>
-              Edit Visit
-            </button>
+            {bookable && (
+              <button type="button" onClick={() => setDialog('edit')} className={secondaryBtn}>
+                Edit Visit
+              </button>
+            )}
             {/* A visit that is over cannot change hands. */}
             {bookable && (
               <Link to={`/scheduling/visits/${visit.id}/assign`} className={secondaryBtn}>
@@ -178,8 +190,8 @@ export function VisitDetailsPage() {
             {bookable && (
               <button
                 type="button"
-                aria-disabled="true"
-                className="inline-flex h-10 items-center rounded-lg border border-red-600 px-4 text-sm font-medium text-red-700 hover:bg-red-50 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent"
+                onClick={() => setDialog('cancel')}
+                className="inline-flex h-10 items-center rounded-lg border border-red-600 px-4 text-sm font-medium text-red-700 hover:bg-red-50"
               >
                 Cancel Visit
               </button>
@@ -239,7 +251,161 @@ export function VisitDetailsPage() {
       {tab === 'care-plan' && <CarePlanTab context={context} />}
       {tab === 'notes' && <NotesTab context={context} />}
       {tab === 'history' && <HistoryTab context={context} />}
+
+      <Drawer open={dialog === 'edit'} onClose={() => setDialog(null)} title="Edit visit" placement="center">
+        <EditVisitForm visit={visit} onDone={() => setDialog(null)} />
+      </Drawer>
+      <Drawer open={dialog === 'cancel'} onClose={() => setDialog(null)} title="Cancel visit" placement="center">
+        <CancelVisitForm visit={visit} onDone={() => setDialog(null)} />
+      </Drawer>
     </div>
+  )
+}
+
+const noteKinds = [
+  { value: 'team', label: 'Coordinator / office note' },
+  { value: 'caregiver', label: 'Caregiver note' },
+  { value: 'family', label: 'Family note' },
+] as const
+
+function AddVisitNoteForm({ visit, onDone }: { visit: BoardVisit; onDone: () => void }) {
+  const [kind, setKind] = useState<(typeof noteKinds)[number]['value']>('team')
+  const [body, setBody] = useState('')
+  const valid = body.trim() !== ''
+  return (
+    <form
+      className="space-y-4 p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid) return
+        addVisitNote(visit.id, { author: SIGNED_IN, authorRole: SIGNED_IN_ROLE, body: body.trim(), kind })
+        onDone()
+      }}
+    >
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Note type</span>
+        <SelectBox value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className={cn(fieldControl, 'mt-1.5')}>
+          {noteKinds.map((k) => (
+            <option key={k.value} value={k.value}>{k.label}</option>
+          ))}
+        </SelectBox>
+      </label>
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Note</span>
+        <textarea
+          rows={4}
+          maxLength={500}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="What happened on this visit"
+          className={cn(fieldControl, 'mt-1.5 h-auto py-2')}
+        />
+      </label>
+      <p className="text-ink-subtle text-xs">Filed as {SIGNED_IN}, against this visit.</p>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onDone} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+          Cancel
+        </button>
+        <button type="submit" disabled={!valid} className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
+          Add Note
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function EditVisitForm({ visit, onDone }: { visit: BoardVisit; onDone: () => void }) {
+  const current = visitEdit(visit.id)
+  const [type, setType] = useState(current?.type ?? visit.type)
+  const [start, setStart] = useState(current?.start ?? visit.start)
+  const [duration, setDuration] = useState(String(current?.durationHours ?? visit.durationHours))
+  const types = useMemo(() => {
+    const list = serviceTypes()
+    return list.includes(visit.type) ? list : [visit.type, ...list]
+  }, [visit.type])
+  const hours = Number(duration)
+  const valid = /^\d{2}:\d{2}$/.test(start) && Number.isFinite(hours) && hours > 0 && hours <= 24
+  return (
+    <form
+      className="space-y-4 p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid) return
+        editVisit(visit.id, { type, start, durationHours: hours })
+        onDone()
+      }}
+    >
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Visit type</span>
+        <SelectBox value={type} onChange={(e) => setType(e.target.value)} className={cn(fieldControl, 'mt-1.5')}>
+          {types.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </SelectBox>
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Start time</span>
+          <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={cn(fieldControl, 'mt-1.5')} />
+        </label>
+        <label className="block">
+          <span className="text-ink text-sm font-medium">Duration (hours)</span>
+          <input inputMode="decimal" value={duration} onChange={(e) => setDuration(e.target.value)} className={cn(fieldControl, 'mt-1.5', !valid && duration !== '' && 'border-red-500')} />
+        </label>
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onDone} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+          Cancel
+        </button>
+        <button type="submit" disabled={!valid} className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
+          Save Changes
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function CancelVisitForm({ visit, onDone }: { visit: BoardVisit; onDone: () => void }) {
+  const reasons = ['Cancelled by family', 'Cancelled by caregiver', 'Recipient in hospital', 'Rescheduled', 'Other']
+  const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
+  const valid = reason !== '' && (reason !== 'Other' || note.trim() !== '')
+  return (
+    <form
+      className="space-y-4 p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid) return
+        const full = reason === 'Other' ? note.trim() : note.trim() ? `${reason}: ${note.trim()}` : reason
+        cancelVisit(visit.id, full)
+        onDone()
+      }}
+    >
+      <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        This marks {visit.recipientName}&rsquo;s visit as cancelled on the board and the schedule.
+      </p>
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Reason</span>
+        <SelectBox value={reason} onChange={(e) => setReason(e.target.value)} className={cn(fieldControl, 'mt-1.5')}>
+          <option value="">Select a reason</option>
+          {reasons.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </SelectBox>
+      </label>
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Note {reason !== 'Other' && <span className="text-ink-subtle text-xs font-normal">(optional)</span>}</span>
+        <textarea rows={3} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} className={cn(fieldControl, 'mt-1.5 h-auto py-2')} />
+      </label>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onDone} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+          Keep Visit
+        </button>
+        <button type="submit" disabled={!valid} className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50">
+          Cancel Visit
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -523,25 +689,35 @@ function TaskRow({ task }: { task: VisitTask }) {
 
 function OverviewNotes({ context }: { context: VisitContext }) {
   const { visit, notes } = context
-  const all = useMemo(() => visitNotesFor(visit, notes), [visit, notes])
+  const [adding, setAdding] = useState(false)
+  const [rev, setRev] = useState(0)
+  // `rev` bumps after a note is added, to recompute the list.
+  const all = useMemo(() => (void rev, visitNotesFor(visit, notes)), [visit, notes, rev])
   const shown = all.slice(0, OVERVIEW_NOTES)
 
   return (
     <Card
       title="Visit Notes"
       actions={
-        // Nothing in the app stores a note yet, so this announces itself as
-        // unavailable rather than opening a form that saves nowhere.
         <button
           type="button"
-          aria-disabled="true"
-          className="text-brand-700 inline-flex items-center gap-1 font-medium aria-disabled:cursor-default aria-disabled:opacity-50"
+          onClick={() => setAdding(true)}
+          className="text-brand-700 hover:text-brand-800 inline-flex items-center gap-1 font-medium"
         >
           <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Add Note
         </button>
       }
     >
+      <Drawer open={adding} onClose={() => setAdding(false)} title="Add visit note" placement="center">
+        <AddVisitNoteForm
+          visit={visit}
+          onDone={() => {
+            setAdding(false)
+            setRev((n) => n + 1)
+          }}
+        />
+      </Drawer>
       {shown.length === 0 ? (
         <p className="text-ink-muted text-sm" role="status">
           Nothing was filed inside this visit&rsquo;s window.
@@ -741,13 +917,12 @@ function CaregiverCard({ context }: { context: VisitContext }) {
             <ArrowRight className="size-3.5" strokeWidth={2.2} aria-hidden="true" />
           </CardLink>
           <span aria-hidden="true" className="bg-line h-4 w-px" />
-          <button
-            type="button"
-            aria-disabled="true"
-            className="text-brand-700 font-medium aria-disabled:cursor-default aria-disabled:opacity-50"
+          <Link
+            to={`/messages?with=caregiver:${caregiver.id}`}
+            className="text-brand-700 hover:text-brand-800 font-medium"
           >
             Message<span className="sr-only"> {caregiver.name}</span>
-          </button>
+          </Link>
         </>
       }
     >
