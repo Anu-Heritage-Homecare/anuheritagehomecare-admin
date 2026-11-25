@@ -311,19 +311,19 @@ export function AnalyticsTab({ plan }: { plan: Plan }) {
     {
       id: 'mrr',
       label: 'Monthly revenue',
-      value: formatMoney(a.monthlyRevenue),
-      hint: `${a.subscribers.toLocaleString()} × ${formatMoney(a.arpu)}`,
+      value: formatMoney(a.monthlyRevenue, 'NGN'),
+      hint: `${a.subscribers.toLocaleString()} × ${formatMoney(a.arpu, 'NGN')}`,
     },
     {
       id: 'annual',
       label: 'Annualised',
-      value: formatMoney(a.annualRevenue),
+      value: formatMoney(a.annualRevenue, 'NGN'),
       hint: 'Monthly revenue × 12',
     },
     {
       id: 'arpu',
       label: 'Revenue per subscriber',
-      value: formatMoney(a.arpu),
+      value: formatMoney(a.arpu, 'NGN'),
       hint: 'The list price, by construction',
     },
     {
@@ -376,12 +376,13 @@ export function AnalyticsTab({ plan }: { plan: Plan }) {
               label: 'Billing unit',
               value: `1 ${unitNoun[plan.model].one} at ${formatMoney(
                 unitRate[plan.model],
+                'NGN',
               )}`,
             },
             {
               id: 'hourly',
               label: 'Effective hourly rate',
-              value: `${formatMoney(a.effectiveHourlyRate)} / hour`,
+              value: `${formatMoney(a.effectiveHourlyRate, 'NGN')} / hour`,
             },
             {
               id: 'allowance',

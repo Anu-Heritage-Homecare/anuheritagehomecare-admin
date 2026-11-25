@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, TriangleAlert } from 'lucide-react'
+import { Loader2, Plus, TriangleAlert } from 'lucide-react'
 import {
   ROSTER_PAGE_SIZE,
   age,
@@ -11,14 +11,10 @@ import {
   experienceYears,
   expiredCount,
   formatMonth,
-  getStaffMember,
   performanceFor,
-  rosterSummary,
   sortOptions,
   sortStaff,
-  staffMembers,
   statusLabels,
-  useStaffRevision,
   statusTones,
 } from '@/features/caregivers/roster-data'
 import type {
@@ -26,6 +22,10 @@ import type {
   StaffSort,
   StaffStatus,
 } from '@/features/caregivers/roster-data'
+import {
+  useCaregiverProfile,
+  useCaregiverRoster,
+} from '@/features/caregivers/useCaregivers'
 import { OverviewTab } from '@/features/caregivers/StaffTabs'
 import { NotesTab } from '@/features/caregivers/NotesTab'
 import { DocumentsTab } from '@/features/caregivers/DocumentsTab'
@@ -63,8 +63,6 @@ function isStatus(value: string | null): StaffStatus | 'all' {
 }
 
 export function CaregiversPage() {
-  // Re-render when a caregiver is added this session.
-  const staffRev = useStaffRevision()
   const { caregiverId, tab } = useParams()
   const [params, setParams] = useSearchParams()
 
@@ -82,10 +80,12 @@ export function CaregiversPage() {
     setParams(next, { replace: key === 'q' })
   }
 
+  const roster = useCaregiverRoster()
+  const members = useMemo(() => roster.data?.members ?? [], [roster.data])
+
   const filtered = useMemo(() => {
-    void staffRev
     const needle = query.trim().toLowerCase()
-    const matched = staffMembers.filter((s) => {
+    const matched = members.filter((s) => {
       if (status !== 'all' && s.status !== status) return false
       if (!needle) return true
       return (
@@ -97,7 +97,7 @@ export function CaregiversPage() {
       )
     })
     return sortStaff(matched, sort)
-  }, [query, status, sort, staffRev])
+  }, [members, query, status, sort])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / ROSTER_PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
@@ -112,23 +112,12 @@ export function CaregiversPage() {
   }).toString()
   const suffix = search ? `?${search}` : ''
 
-  const member = getStaffMember(caregiverId)
-
-  // A bad id is a dead end, and a missing tab resolves rather than blanking.
-  if (caregiverId && !member) return <Navigate to={`/caregivers${suffix}`} replace />
-  if (member && !isTab(tab))
-    return <Navigate to={`/caregivers/${member.id}/overview${suffix}`} replace />
-
-  if (member && isTab(tab)) {
-    /*
-     * Tab links keep every parameter, including ones a tab owns itself like the
-     * schedule's `week` — switching tabs used to silently reset it. Links back
-     * to the roster keep only the roster's own filters.
-     */
+  // The profile is its own request; the roster rows carry only the table columns.
+  if (caregiverId) {
     const all = params.toString()
     return (
-      <StaffProfile
-        member={member}
+      <StaffProfileLoader
+        caregiverId={caregiverId}
         tab={tab}
         suffix={suffix}
         tabSuffix={all ? `?${all}` : ''}
@@ -136,7 +125,16 @@ export function CaregiversPage() {
     )
   }
 
-  const summary = rosterSummary()
+  const summary = {
+    total: members.length,
+    active: members.filter((s) => s.status === 'active').length,
+    onLeave: members.filter((s) => s.status === 'on-leave').length,
+    caregivers: members.filter((s) => s.title !== 'Care Coordinator').length,
+    coordinators: members.filter((s) => s.title === 'Care Coordinator').length,
+    // Compliance is read from each caregiver's credentials, which the directory
+    // row does not carry; it is counted on the profile, not the roster.
+    complianceIssues: 0,
+  }
   const tiles: {
     id: string
     label: string
@@ -177,13 +175,13 @@ export function CaregiversPage() {
             work on, so both cover whatever the visit log holds.
           </p>
         </div>
-        <Link
-          to="/caregivers/new"
+        <button
+          type="button"
           className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
         >
           <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Add caregiver
-        </Link>
+        </button>
       </header>
 
       <section aria-labelledby="roster-kpis">
@@ -254,7 +252,27 @@ export function CaregiversPage() {
           />
         </div>
 
-        {rows.length === 0 ? (
+        {roster.isPending ? (
+          <p
+            role="status"
+            className="text-ink-subtle border-line flex items-center justify-center gap-2 border-t px-4 py-10 text-center text-sm"
+          >
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+            Loading the roster…
+          </p>
+        ) : roster.isError ? (
+          <div className="border-line flex flex-col items-center gap-3 border-t px-4 py-10 text-center">
+            <p className="text-ink text-sm font-medium">Could not load the roster.</p>
+            <p className="text-ink-subtle text-sm">{roster.error.message}</p>
+            <button
+              type="button"
+              onClick={() => void roster.refetch()}
+              className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : rows.length === 0 ? (
           <p
             role="status"
             className="text-ink-subtle border-line border-t px-4 py-10 text-center text-sm"
@@ -315,6 +333,62 @@ export function CaregiversPage() {
 }
 
 /* --------------------------------- profile -------------------------------- */
+
+/** Fetches one caregiver's profile; the page owns the spinner and the error. */
+function StaffProfileLoader({
+  caregiverId,
+  tab,
+  suffix,
+  tabSuffix,
+}: {
+  caregiverId: string
+  tab: string | undefined
+  suffix: string
+  tabSuffix: string
+}) {
+  const { data: member, isPending, isError, error, refetch } = useCaregiverProfile(caregiverId)
+
+  if (isPending) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading caregiver…
+      </div>
+    )
+  }
+  if (isError) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load this caregiver.</p>
+        <p className="text-ink-subtle text-sm">{error.message}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+          <Link
+            to={`/caregivers${suffix}`}
+            className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+          >
+            Back to the roster
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // A missing or unknown tab resolves to Overview rather than blanking.
+  if (!isTab(tab)) {
+    return <Navigate to={`/caregivers/${member.id}/overview${suffix}`} replace />
+  }
+
+  return (
+    <StaffProfile member={member} tab={tab} suffix={suffix} tabSuffix={tabSuffix} />
+  )
+}
 
 function StaffProfile({
   member,

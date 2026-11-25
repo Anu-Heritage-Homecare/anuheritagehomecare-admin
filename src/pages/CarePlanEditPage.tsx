@@ -12,7 +12,7 @@ import type {
   ScheduleEntry,
 } from '@/features/care-recipients/care-plan-data'
 import { fieldControl } from '@/lib/field-classes'
-import { SIGNED_IN } from '@/lib/session'
+import { useAuth } from '@/lib/auth-context'
 import { TODAY } from '@/lib/today'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
@@ -131,6 +131,10 @@ const empty = (text: string) => <p className="text-ink-muted border-line rounded
 
 function PlanForm({ profile }: { profile: RecipientProfile }) {
   const navigate = useNavigate()
+  const { admin } = useAuth()
+  // The revision is attributed to the signed in admin, or a neutral label when
+  // the profile has not loaded yet.
+  const author = admin?.fullName ?? 'Office'
   const back = `/care-recipients/${profile.id}/care-plan`
   const existing = getCarePlan(profile.id)
   const creating = !existing
@@ -211,7 +215,7 @@ function PlanForm({ profile }: { profile: RecipientProfile }) {
             dateIso: TODAY,
             date: shortDate(TODAY),
             summary: summary.trim() || (creating ? 'Initial care plan created' : 'Care plan updated'),
-            author: SIGNED_IN,
+            author,
           },
         )
         navigate(back)
@@ -347,7 +351,7 @@ function PlanForm({ profile }: { profile: RecipientProfile }) {
       <section aria-labelledby="plan-revision" className="card p-5 sm:p-6">
         <h2 id="plan-revision" className="text-ink text-base font-semibold tracking-tight">Revision Note</h2>
         <p className="text-ink-muted mt-0.5 text-sm">
-          Added to the revision history as {SIGNED_IN}, {shortDate(TODAY)}.
+          Added to the revision history as {author}, {shortDate(TODAY)}.
         </p>
         <Labelled label="Summary of changes (optional)" className="mt-4">
           <input

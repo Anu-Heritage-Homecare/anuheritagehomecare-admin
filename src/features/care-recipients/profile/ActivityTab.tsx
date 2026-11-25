@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { History, Search } from 'lucide-react'
+import { History, Loader2, Search } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
+import { useRecipientActivity } from '../useRecipientActivity'
 import {
   ACTIVITY_PAGE_SIZE,
   actors,
   activityTypeLabels,
   activityTypeTones,
   activityTypes,
-  buildActivity,
   formatDayHeading,
   formatTime,
   groupByDay,
@@ -27,10 +27,13 @@ type TypeFilter = ActivityType | 'all'
 
 export function ActivityTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const all = useMemo(() => buildActivity(profile.id), [profile.id])
+  const { data, isPending, isError, error, refetch } = useRecipientActivity(profile.id)
+  const all = useMemo(() => data ?? [], [data])
 
   const [type, setType] = useState<TypeFilter>('all')
-  const [range, setRange] = useState('7')
+  // Defaults to the full read window: the range filter measures from the
+  // fixture "today", so a 7 day default would hide live dated entries.
+  const [range, setRange] = useState('all')
   const [user, setUser] = useState('all')
   const [order, setOrder] = useState<ActivityOrder>('newest')
   const [query, setQuery] = useState('')
@@ -68,6 +71,31 @@ export function ActivityTab() {
       setter(value)
       setVisible(ACTIVITY_PAGE_SIZE)
     }
+
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading activity…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load activity</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   if (all.length === 0) {
     return (

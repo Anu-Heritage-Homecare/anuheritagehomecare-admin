@@ -1,10 +1,10 @@
 import { ArrowUp, ArrowDown } from 'lucide-react'
-import { stats } from './data'
+import type { Stat } from './data'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { toneChip } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
-export function OperationsSnapshot() {
+export function OperationsSnapshot({ stats }: { stats: Stat[] }) {
   return (
     <section aria-labelledby="operations-snapshot">
       <SectionHeading id="operations-snapshot" title="Operations Snapshot">

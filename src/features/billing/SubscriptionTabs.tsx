@@ -165,7 +165,7 @@ export function OverviewPanel({ detail }: { detail: SubscriptionDetail }) {
                   </Link>
                 ),
               },
-              { id: 'price', label: 'List price', value: formatMoney(plan.monthlyPrice) },
+              { id: 'price', label: 'List price', value: formatMoney(plan.monthlyPrice, 'NGN') },
               { id: 'cycle', label: 'Billing cycle', value: sub.cycle },
               {
                 id: 'start',
@@ -253,11 +253,11 @@ export function BillingPanel({ detail }: { detail: SubscriptionDetail }) {
                   {invoice.number}
                 </p>
                 <p className="text-ink shrink-0 text-sm font-semibold tabular-nums">
-                  {formatMoney(patientDue(invoice, rate))}
+                  {formatMoney(patientDue(invoice, rate), 'NGN')}
                 </p>
               </div>
               <p className="text-ink-subtle mt-0.5 text-xs break-words">
-                {invoice.visits} visits · {formatMoney(invoiceAmount(invoice))} billed ·{' '}
+                {invoice.visits} visits · {formatMoney(invoiceAmount(invoice), 'NGN')} billed ·{' '}
                 {status === 'paid'
                   ? `paid ${formatShortDate(invoice.paidAt ?? invoice.dueAt)}`
                   : `due ${formatShortDate(invoice.dueAt)}`}
@@ -324,8 +324,8 @@ export function HoursPanel({ detail }: { detail: SubscriptionDetail }) {
         </div>
         <p className="text-ink-subtle mt-1.5 text-xs">
           Contract {hours.contract} · minimum {plan.unitsPerMonth} hours a month ·
-          balance bought for {formatMoney(hours.value)} ({hours.purchased} ×{' '}
-          {formatMoney(hours.value / hours.purchased)})
+          balance bought for {formatMoney(hours.value, 'NGN')} ({hours.purchased} ×{' '}
+          {formatMoney(hours.value / hours.purchased, 'NGN')})
         </p>
       </div>
 
@@ -365,7 +365,7 @@ export function RenewalsPanel({ detail }: { detail: SubscriptionDetail }) {
                 ? 'Billed by invoice, no card renewal'
                 : 'Not scheduled',
           },
-          { id: 'amount', label: 'Renewal amount', value: formatMoney(renewal.amount) },
+          { id: 'amount', label: 'Renewal amount', value: formatMoney(renewal.amount, 'NGN') },
           { id: 'cycle', label: 'Cycle', value: sub.cycle },
           { id: 'auto', label: 'Auto-renew', value: sub.autoRenew ? 'On' : 'Off' },
           {
@@ -385,7 +385,7 @@ export function RenewalsPanel({ detail }: { detail: SubscriptionDetail }) {
         >
           The last charge on this plan failed:{' '}
           <strong className="font-semibold">{renewal.failed.id}</strong> for{' '}
-          {formatMoney(renewal.failed.amount)} on{' '}
+          {formatMoney(renewal.failed.amount, 'NGN')} on{' '}
           {formatDate(renewal.failed.at)}. The cycle date above has already
           rolled forward, so the balance is still outstanding.
         </p>
@@ -504,7 +504,7 @@ export function PaymentsPanel({ detail }: { detail: SubscriptionDetail }) {
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-ink text-sm font-semibold tabular-nums">
-                    {formatMoney(t.amount)}
+                    {formatMoney(t.amount, 'NGN')}
                   </p>
                   <p className="text-ink-subtle mt-0.5 text-xs capitalize">
                     {t.status} · {formatDate(t.at)}
@@ -532,7 +532,7 @@ export function PaymentsPanel({ detail }: { detail: SubscriptionDetail }) {
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-ink text-sm font-semibold tabular-nums">
-                    {formatMoney(p.amount)}
+                    {formatMoney(p.amount, 'NGN')}
                   </p>
                   <p className="text-ink-subtle mt-0.5 text-xs">
                     {formatShortDate(p.paidAt)}

@@ -1,20 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, CircleHelp, ClipboardList, Plus, Settings } from 'lucide-react'
+import { ChevronRight, CircleHelp, ClipboardList, Loader2, Plus, Settings } from 'lucide-react'
 import {
-  addChecklist,
-  addFormat,
-  addService,
   formatDuration,
   formatRate,
   guardrailText,
   matchAlgorithms,
   parseWhole,
-  setServiceEnabled,
-  updateGuardrails,
   useCareOperations,
+  useCareOperationsMutations,
 } from '@/features/settings/care-operations'
-import type { Guardrails, MatchAlgorithm } from '@/features/settings/care-operations'
+import type { CareOperations, Guardrails, MatchAlgorithm } from '@/features/settings/care-operations'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
 import { cn } from '@/lib/cn'
@@ -42,7 +38,9 @@ const numeric: Record<NumericKey, { field: string; unit: string; min: number; ma
 }
 const numericKeys = Object.keys(numeric) as NumericKey[]
 
-type Dialog = 'service' | 'format' | 'template' | 'configure' | GuardrailKey | null
+type Dialog = 'service' | 'format' | 'configure' | GuardrailKey | null
+
+type Mutations = ReturnType<typeof useCareOperationsMutations>
 
 function Card({
   title,
@@ -77,10 +75,10 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 export function CareOperationsSettingsPage() {
-  const ops = useCareOperations()
+  const { data, isPending, isError, error, refetch } = useCareOperations()
+  const mutations = useCareOperationsMutations()
   const [dialog, setDialog] = useState<Dialog>(null)
   const close = () => setDialog(null)
-  const editingKey = guardrailRows.find((r) => r.key === dialog)?.key
 
   return (
     <div className="space-y-5">
@@ -94,24 +92,67 @@ export function CareOperationsSettingsPage() {
         <button
           type="button"
           onClick={() => setDialog('configure')}
-          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          disabled={isPending || isError}
+          className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
         >
           <Settings className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Configure Operations
         </button>
       </header>
 
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading care operations…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load care operations.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <Body data={data} mutations={mutations} dialog={dialog} setDialog={setDialog} close={close} />
+      )}
+    </div>
+  )
+}
+
+function Body({
+  data,
+  mutations,
+  dialog,
+  setDialog,
+  close,
+}: {
+  data: CareOperations
+  mutations: Mutations
+  dialog: Dialog
+  setDialog: (d: Dialog) => void
+  close: () => void
+}) {
+  const editingKey = guardrailRows.find((r) => r.key === dialog)?.key
+
+  return (
+    <>
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
         <Card title="Service Offerings & Status" action={<AddButton label="Add Service" onClick={() => setDialog('service')} />}>
           <ul className="divide-line border-line divide-y border-b">
-            {ops.services.map((s) => (
+            {data.services.map((s) => (
               <li key={s.id} className="py-2.5 first:pt-0">
                 <Toggle
                   solidOff
                   label={s.name}
                   hint={s.description}
                   checked={s.enabled}
-                  onChange={(v) => setServiceEnabled(s.id, v)}
+                  disabled={mutations.setServiceEnabled.isPending}
+                  onChange={(v) => mutations.setServiceEnabled.mutate({ id: s.id, enabled: v })}
                   className="items-center"
                   labelClassName={cn('font-semibold', !s.enabled && 'text-ink-subtle font-medium')}
                 />
@@ -132,7 +173,7 @@ export function CareOperationsSettingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-line divide-y">
-                  {ops.formats.map((f) => (
+                  {data.formats.map((f) => (
                     <tr key={f.id}>
                       <th scope="row" className="text-ink px-3 py-2.5 font-semibold">{f.name}</th>
                       <td className="text-ink-muted px-3 py-2.5 whitespace-nowrap">{formatDuration(f.durationHours)}</td>
@@ -163,7 +204,7 @@ export function CareOperationsSettingsPage() {
                 <div key={r.key} className="flex items-center justify-between gap-4 py-2.5 first:pt-0">
                   <div className="min-w-0">
                     <dt className="text-ink-subtle text-[0.6875rem] font-medium tracking-wide uppercase">{r.label}</dt>
-                    <dd className="text-ink mt-0.5 text-sm font-semibold">{guardrailText[r.key](ops.guardrails)}</dd>
+                    <dd className="text-ink mt-0.5 text-sm font-semibold">{guardrailText[r.key](data.guardrails)}</dd>
                   </div>
                   <button
                     type="button"
@@ -178,9 +219,9 @@ export function CareOperationsSettingsPage() {
             </dl>
           </Card>
 
-          <Card title="Standard Task Checklists" action={<AddButton label="Add Template" onClick={() => setDialog('template')} />}>
+          <Card title="Standard Task Checklists" action={null}>
             <ul className="space-y-2.5">
-              {ops.checklists.map((c) => (
+              {data.checklists.map((c) => (
                 <li key={c.id}>
                   {/* The Templates screen is where a checklist's items live. */}
                   <Link
@@ -202,13 +243,10 @@ export function CareOperationsSettingsPage() {
       </div>
 
       <Drawer open={dialog === 'service'} onClose={close} title="Add service" placement="center">
-        <ServiceForm onDone={close} />
+        <ServiceForm mutations={mutations} onDone={close} />
       </Drawer>
       <Drawer open={dialog === 'format'} onClose={close} title="Add visit format" placement="center">
-        <FormatForm onDone={close} />
-      </Drawer>
-      <Drawer open={dialog === 'template'} onClose={close} title="Add checklist template" placement="center">
-        <ChecklistForm onDone={close} />
+        <FormatForm mutations={mutations} onDone={close} />
       </Drawer>
       <Drawer
         open={dialog === 'configure' || Boolean(editingKey)}
@@ -219,12 +257,13 @@ export function CareOperationsSettingsPage() {
       >
         <GuardrailsForm
           key={dialog ?? 'closed'}
-          guardrails={ops.guardrails}
+          guardrails={data.guardrails}
           only={editingKey}
+          mutations={mutations}
           onDone={close}
         />
       </Drawer>
-    </div>
+    </>
   )
 }
 
@@ -285,10 +324,11 @@ function Actions({ onCancel, disabled, label }: { onCancel: () => void; disabled
   )
 }
 
-function ServiceForm({ onDone }: { onDone: () => void }) {
+function ServiceForm({ mutations, onDone }: { mutations: Mutations; onDone: () => void }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const { addService } = mutations
   const valid = Boolean(name.trim() && description.trim())
 
   return (
@@ -297,8 +337,10 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid) return
-        addService({ name: name.trim(), description: description.trim(), enabled })
-        onDone()
+        addService.mutate(
+          { name: name.trim(), description: description.trim(), enabled },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Text label="Service name" value={name} onChange={setName} />
@@ -310,17 +352,18 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
         onChange={setEnabled}
         labelClassName="font-medium"
       />
-      <Actions onCancel={onDone} disabled={!valid} label="Add Service" />
+      <Actions onCancel={onDone} disabled={!valid || addService.isPending} label="Add Service" />
     </form>
   )
 }
 
-function FormatForm({ onDone }: { onDone: () => void }) {
+function FormatForm({ mutations, onDone }: { mutations: Mutations; onDone: () => void }) {
   const [name, setName] = useState('')
   const [varies, setVaries] = useState(false)
   const [hours, setHours] = useState('')
   const [rate, setRate] = useState('')
   const [hourly, setHourly] = useState(false)
+  const { addFormat } = mutations
   const hoursValue = parseWhole(hours, 1, 24)
   const rateValue = parseWhole(rate.replace(/,/g, ''), 1, 10_000_000)
   const valid = Boolean(name.trim()) && (varies || hoursValue !== null) && rateValue !== null
@@ -331,8 +374,10 @@ function FormatForm({ onDone }: { onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid || rateValue === null) return
-        addFormat({ name: name.trim(), durationHours: varies ? null : hoursValue, rate: rateValue, hourly })
-        onDone()
+        addFormat.mutate(
+          { name: name.trim(), durationHours: varies ? null : hoursValue, rate: rateValue, hourly },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Text label="Format name" value={name} onChange={setName} />
@@ -367,36 +412,7 @@ function FormatForm({ onDone }: { onDone: () => void }) {
         onChange={setHourly}
         labelClassName="font-medium"
       />
-      <Actions onCancel={onDone} disabled={!valid} label="Add Format" />
-    </form>
-  )
-}
-
-function ChecklistForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState('')
-  const [count, setCount] = useState('')
-  const countValue = parseWhole(count, 1, 99)
-  const valid = Boolean(name.trim()) && countValue !== null
-
-  return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!valid || countValue === null) return
-        addChecklist(name.trim(), countValue)
-        onDone()
-      }}
-    >
-      <Text label="Checklist name" value={name} onChange={setName} />
-      <Text
-        label="Number of tasks"
-        value={count}
-        onChange={setCount}
-        inputMode="numeric"
-        error={count !== '' && countValue === null && 'Enter a number from 1 to 99.'}
-      />
-      <Actions onCancel={onDone} disabled={!valid} label="Add Template" />
+      <Actions onCancel={onDone} disabled={!valid || addFormat.isPending} label="Add Format" />
     </form>
   )
 }
@@ -405,10 +421,12 @@ function ChecklistForm({ onDone }: { onDone: () => void }) {
 function GuardrailsForm({
   guardrails,
   only,
+  mutations,
   onDone,
 }: {
   guardrails: Guardrails
   only?: GuardrailKey
+  mutations: Mutations
   onDone: () => void
 }) {
   const [text, setText] = useState<Record<NumericKey, string>>({
@@ -417,6 +435,7 @@ function GuardrailsForm({
     maxVisitsPerDay: String(guardrails.maxVisitsPerDay),
   })
   const [algorithm, setAlgorithm] = useState<MatchAlgorithm>(guardrails.algorithm)
+  const { updateGuardrails } = mutations
   const shown = (key: GuardrailKey) => !only || only === key
   const parsed = (key: NumericKey) => parseWhole(text[key], numeric[key].min, numeric[key].max)
   const valid = numericKeys.every((k) => !shown(k) || parsed(k) !== null)
@@ -433,8 +452,7 @@ function GuardrailsForm({
           if (shown(k) && v !== null) patch[k] = v
         }
         if (shown('algorithm')) patch.algorithm = algorithm
-        updateGuardrails(patch)
-        onDone()
+        updateGuardrails.mutate(patch, { onSuccess: onDone })
       }}
     >
       {numericKeys.filter(shown).map((k) => (
@@ -462,7 +480,7 @@ function GuardrailsForm({
           </SelectBox>
         </label>
       )}
-      <Actions onCancel={onDone} disabled={!valid} label="Save" />
+      <Actions onCancel={onDone} disabled={!valid || updateGuardrails.isPending} label="Save" />
     </form>
   )
 }

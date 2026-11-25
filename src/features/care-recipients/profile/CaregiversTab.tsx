@@ -1,11 +1,8 @@
 import { useOutletContext } from 'react-router-dom'
-import { UserRoundX } from 'lucide-react'
+import { Loader2, UserRoundX } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
-import {
-  calculateCoverage,
-  getCaregiverRecord,
-  totalHours,
-} from '../caregivers-data'
+import { calculateCoverage, totalHours } from '../caregivers-data'
+import { useRecipientCaregivers } from '../useRecipientCaregivers'
 import { CareTeamCards } from './CareTeamCards'
 import { ScheduleCoverage } from './ScheduleCoverage'
 import { AssignmentHistory } from './AssignmentHistory'
@@ -15,9 +12,34 @@ import type { Tone } from '@/types'
 
 export function CaregiversTab() {
   const profile = useOutletContext<RecipientProfile>()
-  const record = getCaregiverRecord(profile.id)
+  const { data: record, isPending, isError, error, refetch } = useRecipientCaregivers(profile.id)
 
-  if (!record) {
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading care team…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h2 className="text-ink text-sm font-semibold">Could not load care team</h2>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (record.team.length === 0) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
         <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">

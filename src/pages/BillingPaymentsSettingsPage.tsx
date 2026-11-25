@@ -1,18 +1,14 @@
 import { useState } from 'react'
-import { Plus, SquarePen } from 'lucide-react'
-import {
-  addMethod,
-  addTax,
-  addTerm,
-  parseRate,
-  parseWhole,
-  termExists,
-  updateInvoice,
-  useBillingPayments,
-  validNumber,
-  validPrefix,
-} from '@/features/settings/billing-payments'
+import { Loader2, Plus, SquarePen } from 'lucide-react'
+import { parseRate, parseWhole, validPrefix } from '@/features/settings/billing-payments'
 import type { InvoiceSettings } from '@/features/settings/billing-payments'
+import {
+  useAddPaymentTerm,
+  useAddTax,
+  usePaymentSettings,
+  useUpdateInvoiceSettings,
+} from '@/features/billing/usePaymentSettings'
+import type { BillingPaymentsView } from '@/features/billing/usePaymentSettings'
 import { Drawer } from '@/components/ui/Drawer'
 import { Toggle } from '@/components/ui/Toggle'
 import { cn } from '@/lib/cn'
@@ -82,7 +78,37 @@ function ItemText({ name, detail }: { name: string; detail: string }) {
 }
 
 export function BillingPaymentsSettingsPage() {
-  const s = useBillingPayments()
+  const { data: s, isPending, isError, error, refetch } = usePaymentSettings()
+
+  if (isPending) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading billing and payments settings…
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load billing and payments settings.</p>
+        <p className="text-ink-subtle text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  return <BillingPayments settings={s} />
+}
+
+function BillingPayments({ settings: s }: { settings: BillingPaymentsView }) {
   const [dialog, setDialog] = useState<Dialog>(null)
   const close = () => setDialog(null)
 
@@ -117,16 +143,11 @@ export function BillingPaymentsSettingsPage() {
             <Row label="Due Period">
               {s.invoice.dueDays} {s.invoice.dueDays === 1 ? 'day' : 'days'}
             </Row>
-            <div className="py-2.5">
-              <Toggle
-                label="Auto-generate Invoices"
-                hint="Create billing automatically each month"
-                checked={s.invoice.autoGenerate}
-                onChange={(v) => updateInvoice({ autoGenerate: v })}
-                className="items-center"
-                labelClassName="text-ink-muted font-medium"
-              />
-            </div>
+            <Row label="Auto-numbering">
+              <span className={cn('font-semibold', s.invoice.autoGenerate ? 'text-emerald-600' : 'text-ink-muted')}>
+                {s.invoice.autoGenerate ? 'On' : 'Off'}
+              </span>
+            </Row>
             <Row label="Include VAT in Pricing">
               <span className={cn('font-semibold', s.invoice.vatIncluded ? 'text-emerald-600' : 'text-ink-muted')}>
                 {s.invoice.vatIncluded ? 'Yes' : 'No'}
@@ -141,8 +162,8 @@ export function BillingPaymentsSettingsPage() {
             )}
           >
             {s.invoice.autoGenerate
-              ? 'Invoices will auto-generate on the 1st of each month'
-              : 'Auto-generation is off; invoices are raised by hand'}
+              ? 'Invoice numbers increment automatically on each new invoice'
+              : 'Auto-numbering is off; invoice numbers are set by hand'}
           </p>
         </Card>
 
@@ -151,8 +172,13 @@ export function BillingPaymentsSettingsPage() {
             {s.taxes.map((t) => (
               <li key={t.id} className={cn(itemClass, 'items-start')}>
                 <ItemText name={`${t.name} ${t.ratePercent}%`} detail={t.description} />
-                <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.6875rem] font-semibold text-emerald-700">
-                  Active
+                <span
+                  className={cn(
+                    'shrink-0 rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold',
+                    t.active ? 'bg-emerald-50 text-emerald-700' : 'bg-sunken text-ink-muted',
+                  )}
+                >
+                  {t.active ? 'Active' : 'Inactive'}
                 </span>
               </li>
             ))}
@@ -198,7 +224,7 @@ export function BillingPaymentsSettingsPage() {
         <MethodForm onDone={close} />
       </Drawer>
       <Drawer open={dialog === 'term'} onClose={close} title="Add payment term" placement="center">
-        <TermForm onDone={close} />
+        <TermForm existing={s.terms.map((t) => t.days)} onDone={close} />
       </Drawer>
     </div>
   )
@@ -262,14 +288,14 @@ function Actions({ onCancel, disabled, label }: { onCancel: () => void; disabled
 }
 
 function InvoiceForm({ invoice, onDone }: { invoice: InvoiceSettings; onDone: () => void }) {
+  const save = useUpdateInvoiceSettings()
   const [prefix, setPrefix] = useState(invoice.prefix)
-  const [nextNumber, setNextNumber] = useState(invoice.nextNumber)
+  // The next number is server computed, so it is shown read only.
   const [due, setDue] = useState(String(invoice.dueDays))
   const [vatIncluded, setVatIncluded] = useState(invoice.vatIncluded)
   const dueValue = parseWhole(due, 1, 365)
   const prefixOk = validPrefix(prefix)
-  const numberOk = validNumber(nextNumber)
-  const valid = prefixOk && numberOk && dueValue !== null
+  const valid = prefixOk && dueValue !== null
 
   return (
     <form
@@ -277,12 +303,15 @@ function InvoiceForm({ invoice, onDone }: { invoice: InvoiceSettings; onDone: ()
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid || dueValue === null) return
-        updateInvoice({ prefix, nextNumber, dueDays: dueValue, vatIncluded })
-        onDone()
+        save.mutate({ prefix, dueDays: dueValue, vatIncluded }, { onSuccess: onDone })
       }}
     >
       <Text label="Invoice prefix" value={prefix} onChange={setPrefix} error={!prefixOk && 'Use 1–8 letters, digits or dashes.'} />
-      <Text label="Next number" value={nextNumber} onChange={setNextNumber} error={!numberOk && 'Use digits and dashes, e.g. 2026-0458.'} />
+      <div>
+        <span className="text-ink text-sm font-medium">Next number</span>
+        <input value={invoice.nextNumber} readOnly className={cn(fieldClass, 'bg-sunken/40')} />
+        <span className="text-ink-subtle mt-1 block text-xs">Set automatically from the invoice sequence.</span>
+      </div>
       <Text
         label="Due period"
         value={due}
@@ -298,12 +327,13 @@ function InvoiceForm({ invoice, onDone }: { invoice: InvoiceSettings; onDone: ()
         onChange={setVatIncluded}
         labelClassName="font-medium"
       />
-      <Actions onCancel={onDone} disabled={!valid} label="Save" />
+      <Actions onCancel={onDone} disabled={!valid || save.isPending} label="Save" />
     </form>
   )
 }
 
 function TaxForm({ onDone }: { onDone: () => void }) {
+  const save = useAddTax()
   const [name, setName] = useState('')
   const [rate, setRate] = useState('')
   const [description, setDescription] = useState('')
@@ -316,8 +346,10 @@ function TaxForm({ onDone }: { onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid || rateValue === null) return
-        addTax({ name: name.trim(), ratePercent: rateValue, description: description.trim() })
-        onDone()
+        save.mutate(
+          { name: name.trim(), ratePercent: rateValue, description: description.trim() },
+          { onSuccess: onDone },
+        )
       }}
     >
       <Text label="Tax name" value={name} onChange={setName} />
@@ -330,37 +362,40 @@ function TaxForm({ onDone }: { onDone: () => void }) {
         error={rate !== '' && rateValue === null && 'Enter a rate above 0 and up to 100.'}
       />
       <Text label="Applies to" value={description} onChange={setDescription} />
-      <Actions onCancel={onDone} disabled={!valid} label="Add Tax" />
+      <Actions onCancel={onDone} disabled={!valid || save.isPending} label="Add Tax" />
     </form>
   )
 }
 
 function MethodForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState('')
-  const [detail, setDetail] = useState('')
-  const valid = Boolean(name.trim() && detail.trim())
-
+  // The backend has no "add payment method" endpoint: methods are a fixed enum
+  // (bank transfer, card, cash, mobile money), each edited through its own route
+  // on the Billing Settings screen. Adding a new avenue is not supported, so this
+  // form explains that rather than pretending to persist one.
   return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!valid) return
-        addMethod({ name: name.trim(), detail: detail.trim() })
-        onDone()
-      }}
-    >
-      <Text label="Method name" value={name} onChange={setName} />
-      <Text label="Details" value={detail} onChange={setDetail} />
-      <Actions onCancel={onDone} disabled={!valid} label="Add Method" />
-    </form>
+    <div className="space-y-4 p-4">
+      <p className="text-ink-muted text-sm">
+        Payment methods are a fixed set (bank transfer, card, cash, mobile money). A new avenue cannot
+        be added here; enable or describe an existing method from the Billing Settings screen instead.
+      </p>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onDone}
+          className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+        >
+          Close
+        </button>
+      </div>
+    </div>
   )
 }
 
-function TermForm({ onDone }: { onDone: () => void }) {
+function TermForm({ existing, onDone }: { existing: (number | null)[]; onDone: () => void }) {
+  const save = useAddPaymentTerm()
   const [days, setDays] = useState('')
   const value = parseWhole(days, 1, 365)
-  const taken = value !== null && termExists(value)
+  const taken = value !== null && existing.includes(value)
   const valid = value !== null && !taken
 
   return (
@@ -369,8 +404,7 @@ function TermForm({ onDone }: { onDone: () => void }) {
       onSubmit={(e) => {
         e.preventDefault()
         if (!valid || value === null) return
-        addTerm(value)
-        onDone()
+        save.mutate(value, { onSuccess: onDone })
       }}
     >
       <Text
@@ -388,7 +422,7 @@ function TermForm({ onDone }: { onDone: () => void }) {
         }
       />
       <p className="text-ink-muted text-xs">Listed as {value !== null ? `Net ${value}` : 'Net N'}.</p>
-      <Actions onCancel={onDone} disabled={!valid} label="Add Term" />
+      <Actions onCancel={onDone} disabled={!valid || save.isPending} label="Add Term" />
     </form>
   )
 }

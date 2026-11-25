@@ -1,12 +1,19 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, TriangleAlert } from 'lucide-react'
-import { getRecipientProfile } from '@/features/care-recipients/profile-data'
+import { useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, CheckCircle2, Loader2, TriangleAlert } from 'lucide-react'
+import type { RecipientProfile } from '@/features/care-recipients/profile-data'
+import { useRecipientProfile } from '@/features/care-recipients/useRecipientProfile'
+import {
+  useProcessArchive,
+  useRecipientArchive,
+  useSaveArchiveDraft,
+  type ArchiveDraft,
+} from '@/features/care-recipients/useRecipientArchive'
+import type { DischargeReadiness } from '@/features/care-recipients/discharge-data'
 import {
   acknowledgements,
   defaultEffectiveDate,
   dischargeReasons,
-  getDischargeReadiness,
   holdReasons,
   TODAY,
   type DischargeAction,
@@ -14,6 +21,7 @@ import {
 import { ActionChoice } from '@/features/care-recipients/discharge/ActionChoice'
 import { DischargeChecklist } from '@/features/care-recipients/discharge/DischargeChecklist'
 import { Avatar } from '@/components/ui/Avatar'
+import { ApiError } from '@/lib/api'
 import {
   PriorityBadge,
   RecipientStatusBadge,
@@ -23,43 +31,78 @@ import { SelectBox } from '@/components/ui/SelectBox'
 
 export function DischargePage() {
   const { id } = useParams()
-  const profile = useMemo(
-    () => (id ? getRecipientProfile(id) : undefined),
-    [id],
-  )
+  const profileQuery = useRecipientProfile(id)
+  const archiveQuery = useRecipientArchive(id)
 
-  const [action, setAction] = useState<DischargeAction>('discharge')
-  const [reason, setReason] = useState('')
-  const [effectiveDate, setEffectiveDate] = useState(defaultEffectiveDate())
-  const [summaryNote, setSummaryNote] = useState('')
-  const [acked, setAcked] = useState<Set<string>>(new Set())
-
-  const readiness = useMemo(
-    () => (id ? getDischargeReadiness(id, action) : undefined),
-    [id, action],
-  )
-
-  if (!profile || !readiness) {
+  if (profileQuery.isPending || archiveQuery.isPending) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
-        <h1 className="text-ink text-lg font-semibold">
-          Care recipient not found
-        </h1>
-        <Link
-          to="/care-recipients"
-          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
-        >
-          Back to directory
-        </Link>
+        <Loader2 className="text-brand-600 size-6 animate-spin" aria-hidden="true" />
+        <p className="text-ink-muted mt-3 text-sm">Loading archive readiness…</p>
       </div>
     )
   }
 
+  if (profileQuery.isError || archiveQuery.isError || !profileQuery.data || !archiveQuery.data) {
+    const message =
+      profileQuery.error instanceof ApiError
+        ? profileQuery.error.message
+        : archiveQuery.error instanceof ApiError
+          ? archiveQuery.error.message
+          : 'This care recipient could not be loaded.'
+    return (
+      <div className="card grid place-items-center px-6 py-20 text-center">
+        <h1 className="text-ink text-lg font-semibold">Could not load archive</h1>
+        <p className="text-ink-muted mt-2 text-sm">{message}</p>
+        <button
+          type="button"
+          onClick={() => {
+            void profileQuery.refetch()
+            void archiveQuery.refetch()
+          }}
+          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <DischargeForm
+      key={profileQuery.data.id}
+      profile={profileQuery.data}
+      readiness={archiveQuery.data.readiness}
+      draft={archiveQuery.data.draft}
+    />
+  )
+}
+
+function DischargeForm({
+  profile,
+  readiness,
+  draft,
+}: {
+  profile: RecipientProfile
+  readiness: DischargeReadiness
+  draft: ArchiveDraft | null
+}) {
+  const navigate = useNavigate()
+  const saveDraft = useSaveArchiveDraft(profile.id)
+  const processArchive = useProcessArchive(profile.id)
+
+  // Seed the form from a saved draft on first mount; the key on the parent
+  // remounts this when the recipient changes.
+  const [action, setAction] = useState<DischargeAction>(draft?.action ?? 'discharge')
+  const [reason, setReason] = useState(draft?.reason ?? '')
+  const [effectiveDate, setEffectiveDate] = useState(draft?.effectiveDate ?? defaultEffectiveDate())
+  const [summaryNote, setSummaryNote] = useState(draft?.clinicalSummary ?? '')
+  const [acked, setAcked] = useState<Set<string>>(new Set(draft?.acknowledgements ?? []))
+
   const reasons = action === 'discharge' ? dischargeReasons : holdReasons
   const allAcked = acknowledgements.every((a) => acked.has(a))
   const dateValid = effectiveDate !== '' && effectiveDate >= TODAY
-  const formComplete =
-    reason !== '' && dateValid && summaryNote.trim().length > 0
+  const formComplete = reason !== '' && dateValid && summaryNote.trim().length > 0
 
   /*
    * Two independent gates: the checklist (facts the system can verify) and the
@@ -67,6 +110,34 @@ export function DischargePage() {
    */
   const canSubmit = readiness.canProcess && formComplete && allAcked
   const blockers = readiness.checklist.filter((c) => c.state === 'blocked')
+  const pending = saveDraft.isPending || processArchive.isPending
+  const mutationError =
+    processArchive.error instanceof ApiError
+      ? processArchive.error.message
+      : saveDraft.error instanceof ApiError
+        ? saveDraft.error.message
+        : null
+
+  const submission = () => ({
+    action,
+    reason,
+    effectiveDate,
+    clinicalSummary: summaryNote.trim(),
+    acknowledgements: [...acked],
+  })
+
+  const onSaveDraft = () => {
+    saveDraft.reset()
+    saveDraft.mutate(submission())
+  }
+
+  const onProcess = () => {
+    if (!canSubmit) return
+    processArchive.reset()
+    processArchive.mutate(submission(), {
+      onSuccess: () => navigate(`/care-recipients/${profile.id}`),
+    })
+  }
 
   const toggleAck = (item: string) =>
     setAcked((current) => {
@@ -296,6 +367,29 @@ export function DischargePage() {
         </div>
       )}
 
+      {saveDraft.isSuccess && !pending && (
+        <div
+          role="status"
+          className="rounded-card flex gap-3 border border-emerald-300 bg-emerald-50/50 p-4"
+        >
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          <p className="text-ink-muted min-w-0 text-sm break-words">
+            <span className="font-semibold text-emerald-800">Draft saved.</span> You can return
+            to finish this later.
+          </p>
+        </div>
+      )}
+
+      {mutationError && (
+        <div
+          role="alert"
+          className="rounded-card flex gap-3 border border-red-300 bg-red-50/50 p-4"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-red-600" aria-hidden="true" />
+          <p className="min-w-0 text-sm font-medium text-red-800 break-words">{mutationError}</p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Link
           to={`/care-recipients/${profile.id}`}
@@ -305,22 +399,28 @@ export function DischargePage() {
         </Link>
         <button
           type="button"
-          className="border-brand-300 text-brand-700 hover:bg-brand-50 inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+          onClick={onSaveDraft}
+          disabled={pending}
+          className="border-brand-300 text-brand-700 hover:bg-brand-50 inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium disabled:cursor-default disabled:opacity-50"
         >
-          Save draft
+          {saveDraft.isPending ? 'Saving…' : 'Save draft'}
         </button>
         <button
           type="button"
-          aria-disabled={!canSubmit}
+          onClick={onProcess}
+          aria-disabled={!canSubmit || pending}
           aria-describedby={canSubmit ? undefined : 'submit-block-reason'}
           className={cn(
-            'inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors',
+            'inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white transition-colors',
             action === 'discharge'
               ? 'bg-red-600 hover:bg-red-700 aria-disabled:hover:bg-red-600'
               : 'bg-brand-600 hover:bg-brand-700 aria-disabled:hover:bg-brand-600',
             'aria-disabled:cursor-default aria-disabled:opacity-50',
           )}
         >
+          {processArchive.isPending && (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          )}
           {action === 'discharge' ? 'Process discharge' : 'Place on hold'}
         </button>
       </div>

@@ -1,36 +1,46 @@
-import { useMemo } from 'react'
 import { Link, Outlet, useMatch, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
-import { getRecipientProfile } from '@/features/care-recipients/profile-data'
+import { ArrowLeft, Loader2 } from 'lucide-react'
 import { ProfileHeader } from '@/features/care-recipients/profile/ProfileHeader'
 import { ProfileTabs } from '@/features/care-recipients/profile/ProfileTabs'
 import { actionsForTab } from '@/features/care-recipients/profile/tabs'
+import { useRecipientProfile } from '@/features/care-recipients/useRecipientProfile'
 
 export function RecipientProfilePage() {
   const { id } = useParams()
   // Matched rather than sliced out of the pathname, so a basename or a deeper
   // nesting can't silently yield the wrong slug.
   const activeTab = useMatch('/care-recipients/:id/:tab')?.params.tab
-  // Stable identity: the lookup builds a fresh object each call, which would
-  // otherwise invalidate the Outlet context on every render.
-  const profile = useMemo(() => (id ? getRecipientProfile(id) : undefined), [id])
+  const { data: profile, isPending, isError, error, refetch } = useRecipientProfile(id)
 
-  if (!profile) {
+  if (isPending) {
+    return (
+      <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading care recipient…
+      </div>
+    )
+  }
+
+  if (isError) {
     return (
       <div className="card grid place-items-center px-6 py-20 text-center">
-        <h1 className="text-ink text-lg font-semibold">
-          Care recipient not found
-        </h1>
-        <p className="text-ink-muted mt-1 text-sm">
-          No record matches{' '}
-          <code className="text-ink-subtle break-all">{id}</code>.
-        </p>
-        <Link
-          to="/care-recipients"
-          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
-        >
-          Back to directory
-        </Link>
+        <h1 className="text-ink text-lg font-semibold">Could not load this care recipient</h1>
+        <p className="text-ink-muted mt-1 text-sm">{error.message}</p>
+        <div className="mt-5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+          >
+            Try again
+          </button>
+          <Link
+            to="/care-recipients"
+            className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
+          >
+            Back to directory
+          </Link>
+        </div>
       </div>
     )
   }

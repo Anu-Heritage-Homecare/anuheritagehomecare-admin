@@ -1,13 +1,11 @@
 import { useMemo } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
-import { Download, Layers, TriangleAlert } from 'lucide-react'
+import { Download, Layers, Loader2, TriangleAlert } from 'lucide-react'
 import {
-  careRequests,
   docsLabels,
   docsStatus,
   docsTones,
   familyNameFor,
-  getCareRequest,
   paymentLabels,
   paymentTones,
   planFit,
@@ -18,7 +16,6 @@ import {
   REQUESTS_PAGE_SIZE,
   sortOptions,
   sortRequests,
-  statusCounts,
   statusFor,
   statusLabels,
   statusTones,
@@ -31,11 +28,25 @@ import type {
 } from '@/features/care-recipients/requests-data'
 import { RequestDetail } from '@/features/care-recipients/RequestDetail'
 import { planById, plans } from '@/features/billing/data'
+import { useCareRequests } from '@/features/billing/useCareRequests'
 import { Panel } from '@/components/ui/Panel'
 import { Pagination } from '@/components/ui/Pagination'
 import { SelectFilter } from '@/components/ui/SelectFilter'
 import { tonePill } from '@/lib/tone'
 import { cn } from '@/lib/cn'
+
+/** Queue status tally over the live rows, for the summary tiles. */
+function tallyStatuses(list: CareRequest[]): Record<RequestStatus, number> {
+  const counts: Record<RequestStatus, number> = {
+    approved: 0,
+    rejected: 0,
+    ready: 0,
+    'pending-review': 0,
+    'needs-changes': 0,
+  }
+  for (const r of list) counts[statusFor(r)] += 1
+  return counts
+}
 
 const chip =
   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap'
@@ -62,6 +73,16 @@ function isOneOf<T extends string>(
 export function CareRequestsPage() {
   const { requestId } = useParams()
   const [params, setParams] = useSearchParams()
+
+  /*
+   * The backend queue defaults to its own PENDING status, but the page filters
+   * on statuses it derives client side (ready, needs changes, under review), so
+   * the whole queue is fetched once and the derived filtering below runs over
+   * it. A single generous page covers the intake volume; the server also
+   * paginates if that assumption ever breaks.
+   */
+  const { data, isPending, isError, error, refetch } = useCareRequests(null, 1, 200)
+  const liveRequests = useMemo(() => data?.requests ?? [], [data])
 
   // Filters, the open request and the page all live in the URL, so a queue
   // someone is working through can be handed to a colleague as a link.
@@ -91,7 +112,7 @@ export function CareRequestsPage() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    const matched = careRequests.filter((r) => {
+    const matched = liveRequests.filter((r) => {
       if (status !== 'all' && statusFor(r) !== status) return false
       if (priority !== 'all' && priorityFor(r) !== priority) return false
       if (plan !== 'all' && r.planId !== plan) return false
@@ -105,15 +126,15 @@ export function CareRequestsPage() {
       )
     })
     return sortRequests(matched, sort)
-  }, [query, status, priority, plan, sort])
+  }, [liveRequests, query, status, priority, plan, sort])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / REQUESTS_PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
   const start = (safePage - 1) * REQUESTS_PAGE_SIZE
   const rows = filtered.slice(start, start + REQUESTS_PAGE_SIZE)
 
-  const selected = getCareRequest(requestId)
-  const counts = statusCounts()
+  const selected = liveRequests.find((r) => r.id === requestId)
+  const counts = tallyStatuses(liveRequests)
 
   const search = new URLSearchParams({
     ...(query ? { q: query } : {}),
@@ -125,8 +146,9 @@ export function CareRequestsPage() {
   }).toString()
   const suffix = search ? `?${search}` : ''
 
-  // An unknown reference is a dead end, not an empty aside.
-  if (requestId && !selected)
+  // An unknown reference is a dead end, not an empty aside. Only once the queue
+  // has loaded, so a deep link isn't bounced while the rows are still in flight.
+  if (!isPending && !isError && requestId && !selected)
     return <Navigate to={`/care-recipients/requests${suffix}`} replace />
 
   /*
@@ -138,7 +160,7 @@ export function CareRequestsPage() {
   const withUs = counts['pending-review']
   // A plan the family picked that can't deliver what they asked for, whether
   // by hours or by the services it includes.
-  const mismatched = careRequests.filter(
+  const mismatched = liveRequests.filter(
     (r) => !planFit(r).fits || serviceGaps(r).length > 0,
   ).length
 
@@ -200,6 +222,25 @@ export function CareRequestsPage() {
         </div>
       </header>
 
+      {isPending ? (
+        <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading care requests…
+        </div>
+      ) : isError ? (
+        <div className="card flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-ink text-sm font-medium">Could not load care requests.</p>
+          <p className="text-ink-subtle text-sm">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+      <>
       <section aria-labelledby="queue-counts">
         <h2 id="queue-counts" className="sr-only">
           Queue counts
@@ -214,7 +255,7 @@ export function CareRequestsPage() {
                 {t.value}
               </p>
               <p className="text-ink-subtle mt-1 text-xs break-words">
-                {t.hint} · of {careRequests.length} in the queue
+                {t.hint} · of {liveRequests.length} in the queue
               </p>
             </article>
           ))}
@@ -389,6 +430,8 @@ export function CareRequestsPage() {
         </Link>{' '}
         has been onboarded and does not appear here.
       </p>
+      </>
+      )}
     </div>
   )
 }

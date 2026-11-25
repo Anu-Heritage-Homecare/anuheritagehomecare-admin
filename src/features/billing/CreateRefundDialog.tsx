@@ -79,7 +79,7 @@ function RefundForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
           >
             {payments.map((p) => (
               <option key={p.tx.id} value={p.tx.id}>
-                {p.tx.id} ({formatMoney(p.tx.amount)} - {p.account})
+                {p.tx.id} ({formatMoney(p.tx.amount, 'NGN')} - {p.account})
               </option>
             ))}
           </SelectBox>
@@ -103,9 +103,9 @@ function RefundForm({ onClose, onCreated }: { onClose: () => void; onCreated: (r
           </div>
           <p id="rf-amount-hint" className={cn('mt-1 text-xs', amountOk ? 'text-ink-subtle' : 'text-red-700')}>
             {payment && payment.available < payment.tx.amount
-              ? `${formatMoney(payment.tx.amount - payment.available)} of this payment is already being refunded. `
+              ? `${formatMoney(payment.tx.amount - payment.available, 'NGN')} of this payment is already being refunded. `
               : ''}
-            {amountOk ? `Up to ${formatMoney(payment?.available ?? 0)}.` : `Enter an amount up to ${formatMoney(payment?.available ?? 0)}.`}
+            {amountOk ? `Up to ${formatMoney(payment?.available ?? 0, 'NGN')}.` : `Enter an amount up to ${formatMoney(payment?.available ?? 0, 'NGN')}.`}
           </p>
         </div>
 

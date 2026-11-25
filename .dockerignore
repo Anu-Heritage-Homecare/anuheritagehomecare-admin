@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+.git
+.github
+.lmsrc.tgz
+*.log
+Claude outputs
+.env
+.env.*
+!.env.example
+.DS_Store

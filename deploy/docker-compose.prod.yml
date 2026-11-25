@@ -1,0 +1,20 @@
+# Production stack for the admin frontend on the VPS.
+#
+# The admin is a static site served by nginx inside the container. It is published
+# only on the loopback (127.0.0.1:8080) so the host's nginx can reverse proxy to it
+# with TLS; it is never exposed directly to the public internet.
+#
+# The deploy pipeline sets ADMIN_IMAGE to the exact image tag before running
+# `docker compose -f docker-compose.prod.yml up -d`.
+services:
+  admin:
+    image: ${ADMIN_IMAGE:-ghcr.io/anu-heritage-homecare/anuheritagehomecare-admin:latest}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8080:80'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

@@ -2,13 +2,14 @@
  * Care Operations settings — the services offered, the visit formats and what
  * they are billed at, the scheduling guardrails and the standard checklists.
  *
- * Content follows the Figma settings-care-operations screen as drawn. Nothing
- * here drives the scheduling board, the plan catalogue or the task templates
- * yet; those screens keep their own data.
- *
- * Held in memory for the session, like every other settings store in the app.
+ * Fetched live from the back office (`GET /admin/care-operations`) and mapped
+ * into the shapes the settings page already renders. The app is Naira only, so a
+ * visit format's rate is read from (and written to) its NGN rate line. Checklists
+ * are read only here; the backend exposes no create route, so the design's "Add
+ * Template" action is dropped in the page.
  */
-import { useSyncExternalStore } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 
 export interface ServiceOffering {
   id: string
@@ -40,98 +41,204 @@ export interface Guardrails {
 export interface Checklist {
   id: string
   name: string
-  /** "5 vital tasks" — the count and the design's own noun for it. */
+  /** "5 tasks" — the count and the design's own noun for it. */
   summary: string
 }
 
-interface CareOperations {
+export interface CareOperations {
   services: ServiceOffering[]
   formats: VisitFormat[]
   guardrails: Guardrails
   checklists: Checklist[]
 }
 
-const state: CareOperations = {
-  services: [
-    { id: 'personal-care', name: 'Personal Care', description: 'Assistance with bathing, dressing, and hygiene', enabled: true },
-    { id: 'medication', name: 'Medication Management', description: 'Reminders, dosage tracking, and nurse reviews', enabled: true },
-    { id: 'mobility', name: 'Mobility Support', description: 'Transferring assistance and walking guides', enabled: true },
-    { id: 'meals', name: 'Meal Preparation', description: 'Dietary plan compliance and cooking support', enabled: true },
-    { id: 'companionship', name: 'Companionship', description: 'Conversation, social visits, and recreation', enabled: true },
-    { id: 'nursing', name: 'Nursing Care', description: 'Clinical procedures, wound care, and assessments', enabled: true },
-    { id: 'physio', name: 'Physiotherapy', description: 'Physical therapy drills and rehabilitation sessions', enabled: false },
-  ],
-  formats: [
-    { id: 'standard', name: 'Standard Visit', durationHours: 1, rate: 8500, hourly: false },
-    { id: 'extended', name: 'Extended Visit', durationHours: 2, rate: 15000, hourly: false },
-    { id: 'overnight', name: 'Overnight Care', durationHours: 12, rate: 45000, hourly: false },
-    { id: 'live-in', name: 'Live-in Shift', durationHours: 24, rate: 75000, hourly: false },
-    { id: 'emergency', name: 'Emergency Dispatch', durationHours: null, rate: 12000, hourly: true },
-  ],
-  guardrails: {
-    noticeHours: 24,
-    bufferMinutes: 30,
-    maxVisitsPerDay: 6,
-    algorithm: 'Proximity + Skills',
-  },
-  checklists: [
-    { id: 'daily-check-in', name: 'Daily Check-in Checklist', summary: '5 vital tasks' },
-    { id: 'medication-round', name: 'Medication Round Checklist', summary: '8 tracking checkpoints' },
-    { id: 'personal-care', name: 'Personal Care Routine', summary: '6 personal guidelines' },
-    { id: 'weekly-assessment', name: 'Weekly Assessment Guide', summary: '12 clinical criteria' },
-  ],
+/* --------------------------- backend response ----------------------------- */
+
+type RateUnit = 'PER_VISIT' | 'PER_HOUR'
+type AutoAssignAlgorithm =
+  | 'PROXIMITY_AND_SKILLS'
+  | 'PROXIMITY_ONLY'
+  | 'SKILLS_ONLY'
+  | 'ROUND_ROBIN'
+  | 'MANUAL'
+type Currency = 'USD' | 'NGN'
+
+interface RateDto {
+  currency: Currency
+  baseRateMinor: number
 }
 
-let revision = 0
-const listeners = new Set<() => void>()
-
-function emit(): void {
-  revision += 1
-  for (const l of listeners) l()
+interface ServiceOfferingDto {
+  id: string
+  name: string
+  description: string | null
+  isEnabled: boolean
+  sortOrder: number
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+interface VisitFormatDto {
+  id: string
+  name: string
+  description: string | null
+  durationMinutes: number | null
+  rateUnit: RateUnit
+  isActive: boolean
+  sortOrder: number
+  rates: RateDto[]
 }
 
-export function useCareOperations(): CareOperations {
-  useSyncExternalStore(subscribe, () => revision, () => revision)
-  return state
+interface GuardrailsDto {
+  minimumNoticeHours: number
+  travelBufferMinutes: number
+  maxVisitsPerCaregiverPerDay: number
+  autoAssignAlgorithm: AutoAssignAlgorithm
 }
 
-let seq = 0
-const nextId = (prefix: string) => `${prefix}-new-${(seq += 1)}`
-
-export function setServiceEnabled(id: string, enabled: boolean): void {
-  state.services = state.services.map((s) => (s.id === id ? { ...s, enabled } : s))
-  emit()
+interface TaskChecklistDto {
+  id: string
+  name: string
+  taskCount: number
 }
 
-export function addService(service: Omit<ServiceOffering, 'id'>): void {
-  state.services = [...state.services, { ...service, id: nextId('service') }]
-  emit()
+interface CareOperationsDto {
+  serviceOfferings: ServiceOfferingDto[]
+  visitFormats: VisitFormatDto[]
+  guardrails: GuardrailsDto
+  taskChecklists: TaskChecklistDto[]
 }
 
-export function addFormat(format: Omit<VisitFormat, 'id'>): void {
-  state.formats = [...state.formats, { ...format, id: nextId('format') }]
-  emit()
-}
+/* -------------------------------- mappers --------------------------------- */
 
-export function updateGuardrails(patch: Partial<Guardrails>): void {
-  state.guardrails = { ...state.guardrails, ...patch }
-  emit()
-}
-
-export function addChecklist(name: string, itemCount: number): void {
-  state.checklists = [
-    ...state.checklists,
-    { id: nextId('checklist'), name, summary: `${itemCount} ${itemCount === 1 ? 'task' : 'tasks'}` },
-  ]
-  emit()
-}
+/** The currency this Naira only app reads and writes rates in. */
+const NAIRA: Currency = 'NGN'
 
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`
+
+const ALGORITHM_TO_LABEL: Record<AutoAssignAlgorithm, MatchAlgorithm> = {
+  PROXIMITY_AND_SKILLS: 'Proximity + Skills',
+  PROXIMITY_ONLY: 'Proximity only',
+  SKILLS_ONLY: 'Skills only',
+  MANUAL: 'Manual assignment',
+  // Round robin has no UI label; it falls back to the default when read.
+  ROUND_ROBIN: 'Proximity + Skills',
+}
+
+const LABEL_TO_ALGORITHM: Record<MatchAlgorithm, AutoAssignAlgorithm> = {
+  'Proximity + Skills': 'PROXIMITY_AND_SKILLS',
+  'Proximity only': 'PROXIMITY_ONLY',
+  'Skills only': 'SKILLS_ONLY',
+  'Manual assignment': 'MANUAL',
+}
+
+/** The Naira base rate in major units, or 0 when no NGN rate is set. */
+function nairaRate(format: VisitFormatDto): number {
+  const rate = format.rates.find((r) => r.currency === NAIRA)
+  return rate ? rate.baseRateMinor / 100 : 0
+}
+
+function toView(dto: CareOperationsDto): CareOperations {
+  return {
+    services: dto.serviceOfferings.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description ?? '',
+      enabled: s.isEnabled,
+    })),
+    formats: dto.visitFormats.map((f) => ({
+      id: f.id,
+      name: f.name,
+      durationHours: f.durationMinutes === null ? null : f.durationMinutes / 60,
+      rate: nairaRate(f),
+      hourly: f.rateUnit === 'PER_HOUR',
+    })),
+    guardrails: {
+      noticeHours: dto.guardrails.minimumNoticeHours,
+      bufferMinutes: dto.guardrails.travelBufferMinutes,
+      maxVisitsPerDay: dto.guardrails.maxVisitsPerCaregiverPerDay,
+      algorithm: ALGORITHM_TO_LABEL[dto.guardrails.autoAssignAlgorithm] ?? 'Proximity + Skills',
+    },
+    checklists: dto.taskChecklists.map((c) => ({
+      id: c.id,
+      name: c.name,
+      summary: plural(c.taskCount, 'task'),
+    })),
+  }
+}
+
+/* --------------------------------- hooks ---------------------------------- */
+
+const careOperationsKey = ['admin', 'care-operations'] as const
+
+/** The whole screen, mapped to the shapes the settings page renders. */
+export function useCareOperations() {
+  return useQuery({
+    queryKey: careOperationsKey,
+    queryFn: async () => toView(await api.get<CareOperationsDto>('/admin/care-operations')),
+  })
+}
+
+export interface NewService {
+  name: string
+  description: string
+  enabled: boolean
+}
+
+export interface NewFormat {
+  name: string
+  durationHours: number | null
+  rate: number
+  hourly: boolean
+}
+
+/** The write surface: each mutation returns the refreshed screen and invalidates. */
+export function useCareOperationsMutations() {
+  const queryClient = useQueryClient()
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: careOperationsKey })
+  }
+
+  const setServiceEnabled = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.patch(`/admin/care-operations/services/${id}`, { isEnabled: enabled }),
+    onSuccess: invalidate,
+  })
+
+  const addService = useMutation({
+    mutationFn: (service: NewService) =>
+      api.post('/admin/care-operations/services', {
+        name: service.name,
+        description: service.description,
+        isEnabled: service.enabled,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const addFormat = useMutation({
+    mutationFn: (format: NewFormat) =>
+      api.post('/admin/care-operations/visit-formats', {
+        name: format.name,
+        durationMinutes: format.durationHours === null ? null : format.durationHours * 60,
+        rateUnit: format.hourly ? 'PER_HOUR' : 'PER_VISIT',
+        rates: [{ currency: NAIRA, baseRateMinor: Math.round(format.rate * 100) }],
+      }),
+    onSuccess: invalidate,
+  })
+
+  const updateGuardrails = useMutation({
+    mutationFn: (patch: Partial<Guardrails>) =>
+      api.patch('/admin/care-operations/guardrails', {
+        minimumNoticeHours: patch.noticeHours,
+        travelBufferMinutes: patch.bufferMinutes,
+        maxVisitsPerCaregiverPerDay: patch.maxVisitsPerDay,
+        autoAssignAlgorithm: patch.algorithm ? LABEL_TO_ALGORITHM[patch.algorithm] : undefined,
+      }),
+    onSuccess: invalidate,
+  })
+
+  return { setServiceEnabled, addService, addFormat, updateGuardrails }
+}
+
+/* -------------------------------- helpers --------------------------------- */
 
 export function formatDuration(hours: number | null): string {
   return hours === null ? 'Varies' : plural(hours, 'hour')

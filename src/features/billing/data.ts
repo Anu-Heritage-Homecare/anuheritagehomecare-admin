@@ -493,21 +493,54 @@ export const revenueTrend: { month: string; factor: number }[] = [
 
 /* -------------------------------- formatting ------------------------------- */
 
-const money = new Intl.NumberFormat('en-NG', {
-  style: 'currency',
-  currency: 'NGN',
-  maximumFractionDigits: 0,
-})
+/*
+ * Money arrives from the backend as whole currency units paired with an ISO
+ * currency code derived server side from the account country (USD for US,
+ * NGN for Nigeria). One formatter per currency is cached so the symbol follows
+ * the code ($ or ₦) via narrowSymbol, independent of the display locale.
+ */
+const moneyFormatters = new Map<string, Intl.NumberFormat>()
+const compactFormatters = new Map<string, Intl.NumberFormat>()
 
-export function formatMoney(amount: number): string {
-  return money.format(amount)
+const MONEY_OPTIONS: Intl.NumberFormatOptions = {
+  style: 'currency',
+  currencyDisplay: 'narrowSymbol',
+  maximumFractionDigits: 0,
+}
+const COMPACT_OPTIONS: Intl.NumberFormatOptions = {
+  ...MONEY_OPTIONS,
+  notation: 'compact',
+  maximumFractionDigits: 1,
 }
 
-/** ₦13.9M / ₦294K — for axis ticks and dense cards. */
-export function formatCompact(amount: number): string {
-  if (amount >= 1_000_000) return `₦${(amount / 1_000_000).toFixed(1)}M`
-  if (amount >= 1000) return `₦${Math.round(amount / 1000)}K`
-  return `₦${Math.round(amount)}`
+/**
+ * A cached currency formatter. An unknown or empty code falls back to NGN rather
+ * than throwing, so a malformed amount can never crash a money render.
+ */
+function currencyFormatter(
+  currency: string,
+  cache: Map<string, Intl.NumberFormat>,
+  options: Intl.NumberFormatOptions,
+): Intl.NumberFormat {
+  let formatter = cache.get(currency)
+  if (!formatter) {
+    try {
+      formatter = new Intl.NumberFormat('en-US', { ...options, currency })
+    } catch {
+      formatter = new Intl.NumberFormat('en-US', { ...options, currency: 'NGN' })
+    }
+    cache.set(currency, formatter)
+  }
+  return formatter
+}
+
+export function formatMoney(amount: number, currency: string): string {
+  return currencyFormatter(currency, moneyFormatters, MONEY_OPTIONS).format(amount)
+}
+
+/** $13.9M / ₦294K — for axis ticks and dense cards. */
+export function formatCompact(amount: number, currency: string): string {
+  return currencyFormatter(currency, compactFormatters, COMPACT_OPTIONS).format(amount)
 }
 
 const dateFormat = new Intl.DateTimeFormat('en-US', {

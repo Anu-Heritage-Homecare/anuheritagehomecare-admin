@@ -9,6 +9,7 @@ import {
   CreditCard,
   Download,
   FilePlus,
+  Loader2,
   SquareCheck,
   Star,
   TriangleAlert,
@@ -18,9 +19,8 @@ import {
   formatCompact,
   formatDate,
   formatMoney,
-  revenueMonths,
-  revenueOverWindow,
 } from '@/features/billing/data'
+import { usePlansBilling } from '@/features/billing/usePlansBilling'
 import {
   agingBuckets,
   billingActivity,
@@ -87,7 +87,11 @@ const outlineButton =
 export function PlansBillingPage() {
   useBook()
   const [paying, setPaying] = useState(false)
-  const revenue = revenueOverWindow(TREND_MONTHS)
+  // The market defaults to USD, the backend default for plans and billing.
+  const { data, isPending, isError, error, refetch } = usePlansBilling('USD')
+  // The live overview's own currency; while it loads the trend chart is empty,
+  // so the fallback is cosmetic. The ledger panels below are NGN fixtures.
+  const liveCurrency = data?.currency ?? 'NGN'
   const open = openInvoices()
   const overdue = overdueInvoices()
   const monthPayments = paymentsThisMonth()
@@ -95,7 +99,7 @@ export function PlansBillingPage() {
   const recent = settledPayments().slice(0, RECENT_PAYMENTS)
   const activity = billingActivity()
 
-  const revenueBadge = signed(revenue.change, '%')
+  const revenueBadge = signed(data?.monthlyGrowthPercent ?? 0, '%')
   const collectionBadge = signed(collectionRateDelta(), '%')
 
   /*
@@ -114,16 +118,16 @@ export function PlansBillingPage() {
   }[] = [
     {
       id: 'revenue',
-      label: 'Total Revenue',
-      value: formatMoney(revenue.total),
-      badge: { ...revenueBadge, sr: `${revenueBadge.sr} on the previous ${TREND_MONTHS} months` },
+      label: 'Monthly Revenue',
+      value: data?.revenueLabel ?? formatMoney(0, liveCurrency),
+      badge: { ...revenueBadge, sr: `${revenueBadge.sr} on the previous month` },
       icon: CreditCard,
       tone: 'green',
     },
     {
       id: 'outstanding',
       label: 'Outstanding Balance',
-      value: formatMoney(sumBalances(open)),
+      value: formatMoney(sumBalances(open), 'NGN'),
       badge: { text: `${open.length} invoices`, tone: 'neutral' },
       icon: Download,
       tone: 'amber',
@@ -131,7 +135,7 @@ export function PlansBillingPage() {
     {
       id: 'overdue',
       label: 'Overdue Amount',
-      value: formatMoney(sumBalances(overdue)),
+      value: formatMoney(sumBalances(overdue), 'NGN'),
       badge: { text: `${overdue.length} overdue`, tone: overdue.length ? 'alert' : 'neutral' },
       icon: TriangleAlert,
       tone: 'red',
@@ -139,7 +143,7 @@ export function PlansBillingPage() {
     {
       id: 'payments',
       label: 'Payments This Month',
-      value: formatMoney(monthPayments.reduce((sum, t) => sum + t.amount, 0)),
+      value: formatMoney(monthPayments.reduce((sum, t) => sum + t.amount, 0), 'NGN'),
       badge: { text: `${monthPayments.length} payments`, tone: 'neutral' },
       icon: SquareCheck,
       tone: 'blue',
@@ -183,6 +187,25 @@ export function PlansBillingPage() {
         </div>
       </header>
       <RecordPaymentDrawer open={paying} onClose={() => setPaying(false)} />
+
+      {isPending && (
+        <div className="text-ink-subtle flex items-center gap-2 text-sm">
+          <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          Loading the live revenue overview…
+        </div>
+      )}
+      {isError && (
+        <div className="card flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+          <p className="text-ink">Could not load the revenue overview: {error.message}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="bg-brand-600 hover:bg-brand-700 h-9 rounded-lg px-3 text-sm font-semibold text-white transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       <section aria-labelledby="billing-kpis">
         <h2 id="billing-kpis" className="sr-only">
@@ -229,9 +252,9 @@ export function PlansBillingPage() {
         >
           <div className="pt-2">
             <LineChart
-              points={revenueMonths(TREND_MONTHS)}
-              formatTick={formatCompact}
-              formatValue={formatMoney}
+              points={data?.revenuePoints ?? []}
+              formatTick={(v) => formatCompact(v, liveCurrency)}
+              formatValue={(v) => formatMoney(v, liveCurrency)}
               caption="Monthly revenue, oldest first"
               columns={['Month', 'Revenue']}
             />
@@ -251,7 +274,7 @@ export function PlansBillingPage() {
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <dt className="text-ink text-sm font-medium">{bucket.label}</dt>
                   <dd className="text-ink text-sm font-semibold tabular-nums">
-                    {formatMoney(bucket.amount)}
+                    {formatMoney(bucket.amount, 'NGN')}
                     <span className="sr-only">
                       , {bucket.count} invoices, {bucket.share}% of outstanding
                     </span>
@@ -299,7 +322,7 @@ export function PlansBillingPage() {
                     </td>
                     <td className="text-ink py-3 pr-4">{t.client}</td>
                     <td className="text-ink py-3 pr-4 font-semibold whitespace-nowrap tabular-nums">
-                      {formatMoney(t.amount)}
+                      {formatMoney(t.amount, 'NGN')}
                     </td>
                     <td className="text-ink-muted py-3 pr-4 whitespace-nowrap">
                       {methodKind(t.method)}

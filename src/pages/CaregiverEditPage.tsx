@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Link,
   Navigate,
   useBlocker,
   useLocation,
+  useNavigate,
   useParams,
 } from 'react-router-dom'
-import { Check, ChevronRight, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, ChevronRight, CircleX, Loader2, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import {
   TODAY,
   changesFrom,
-  relationships,
+  credentialLabel,
   deleteBlockers,
   hasErrors,
   hoursOffered,
@@ -23,31 +24,57 @@ import type { Change, FormValues } from '@/features/caregivers/edit-form'
 import {
   branches,
   employmentTypes,
-  getStaffMember,
+  formatTime,
+  shifts,
   statusLabels,
   titles,
+  weekdays,
 } from '@/features/caregivers/roster-data'
+import { useCaregiverProfile } from '@/features/caregivers/useCaregivers'
+import { useCaregiverMutations } from '@/features/caregivers/useCaregiverMutations'
 import type {
+  Credential,
   Employment,
+  Shift,
   StaffMember,
+  Weekday,
 } from '@/features/caregivers/roster-data'
 import { Field } from '@/components/ui/Field'
 import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
-import {
-  Availability,
-  Credentials,
-  TokenList,
-} from '@/features/caregivers/form-sections'
 
 export function CaregiverEditPage() {
   const { caregiverId } = useParams()
   const { search } = useLocation()
-  const member = getStaffMember(caregiverId)
+  const { data: member, isPending, isError, error, refetch } = useCaregiverProfile(caregiverId)
 
-  if (!member) return <Navigate to="/caregivers" replace />
+  if (!caregiverId) return <Navigate to="/caregivers" replace />
+
+  if (isPending) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading caregiver…
+      </div>
+    )
+  }
+  if (isError) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load this caregiver.</p>
+        <p className="text-ink-subtle text-sm">{error.message}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   /*
    * Keyed on the person. The form's state used to live in this component and
@@ -59,6 +86,8 @@ export function CaregiverEditPage() {
 }
 
 function EditForm({ member, search }: { member: StaffMember; search: string }) {
+  const navigate = useNavigate()
+  const { save, remove } = useCaregiverMutations(member.id)
   const [values, setValues] = useState<FormValues>(() => toFormValues(member))
   const [submitted, setSubmitted] = useState(false)
   // Not on the staff record yet, so it lives only on this form for now.
@@ -121,8 +150,14 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
     setAttempt((n) => n + 1)
     setSubmitted(true)
     // Nothing to save is not an error, but it must not report "0 changes".
-    if (!dirty || invalid) return
-    setSaved(changes)
+    if (!dirty || invalid || save.isPending) return
+    // Capture the diff for the summary, then persist every section that the
+    // form covers. The record is refetched on success so the profile is fresh.
+    const persisted = changes
+    save.mutate(
+      { id: member.id, before: member, values },
+      { onSuccess: () => setSaved(persisted) },
+    )
   }
 
   const offered = hoursOffered(values.availability)
@@ -164,7 +199,7 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
             Update {member.name}{/s$/i.test(member.name) ? '’' : '’s'} information, certifications, and preferences.
           </p>
         </div>
-        <Actions dirty={dirty} to={profile} where="at the top of the form" />
+        <Actions dirty={dirty} to={profile} where="at the top of the form" saving={save.isPending} />
       </header>
 
       {submitted && invalid && (
@@ -253,7 +288,17 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
         </div>
       )}
 
-      {saved && (
+      {save.isError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        >
+          <p className="font-semibold">The changes could not be saved.</p>
+          <p className="mt-1">{save.error.message}</p>
+        </div>
+      )}
+
+      {saved && !save.isError && (
         <SaveSummary
           ref={savedRef}
           changes={saved}
@@ -641,8 +686,16 @@ function EditForm({ member, search }: { member: StaffMember; search: string }) {
       </section>
 
       <div className="border-line -mx-4 flex flex-wrap items-center justify-between gap-3 border-t px-4 pt-5 sm:-mx-6 sm:px-6">
-        <DeleteControl member={member} blockers={blockers} />
-        <Actions dirty={dirty} to={profile} where="at the end of the form" />
+        <DeleteControl
+          member={member}
+          blockers={blockers}
+          onDelete={() =>
+            remove.mutate(member.id, { onSuccess: () => void navigate(rosterPath) })
+          }
+          deleting={remove.isPending}
+          deleteError={remove.isError ? remove.error.message : null}
+        />
+        <Actions dirty={dirty} to={profile} where="at the end of the form" saving={save.isPending} />
       </div>
     </form>
   )
@@ -654,11 +707,14 @@ function Actions({
   dirty,
   to,
   where,
+  saving = false,
 }: {
   dirty: boolean
   to: string
   /** Distinguishes the header pair from the footer pair for a screen reader. */
   where: string
+  /** A save is in flight, so the button shows progress and blocks a re submit. */
+  saving?: boolean
 }) {
   const reasonId = `save-reason-${where.replace(/\s+/g, '-')}`
 
@@ -678,16 +734,17 @@ function Actions({
       */}
       <button
         type="submit"
-        aria-disabled={!dirty}
+        aria-disabled={!dirty || saving}
         aria-describedby={dirty ? undefined : reasonId}
         // Drawn as the Figma's primary button either way; a clean submit is
         // answered by the "nothing to save" message rather than a grey button.
         className={cn(
-          'bg-brand-600 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white',
-          dirty ? 'hover:bg-brand-700' : 'cursor-default',
+          'bg-brand-600 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white',
+          dirty && !saving ? 'hover:bg-brand-700' : 'cursor-default',
         )}
       >
-        Save Changes
+        {saving && <Loader2 className="size-4 animate-spin" strokeWidth={2} aria-hidden="true" />}
+        {saving ? 'Saving…' : 'Save Changes'}
         <span className="sr-only"> {where}</span>
       </button>
       {!dirty && (
@@ -719,15 +776,10 @@ function SaveSummary({
     >
       <p className="flex items-center gap-2 font-semibold">
         <Check className="size-4 shrink-0" strokeWidth={2.6} aria-hidden="true" />
-        {changes.length} change{changes.length === 1 ? '' : 's'} ready for{' '}
+        {changes.length} change{changes.length === 1 ? '' : 's'} saved for{' '}
         {name}
       </p>
-      {/* No backend to write to, so the screen reports the diff rather than
-          claiming a save that did not happen. */}
-      <p className="mt-1 text-emerald-800">
-        Nothing has been written — this build has no server. Here is what would
-        change:
-      </p>
+      <p className="mt-1 text-emerald-800">Here is what was written:</p>
       <ul className="mt-2 space-y-1">
         {changes.map((change) => (
           <li key={change.field} className="break-words">
@@ -746,9 +798,15 @@ function SaveSummary({
 function DeleteControl({
   member,
   blockers,
+  onDelete,
+  deleting,
+  deleteError,
 }: {
   member: StaffMember
   blockers: string[]
+  onDelete: () => void
+  deleting: boolean
+  deleteError: string | null
 }) {
   const [confirming, setConfirming] = useState(false)
   const blocked = blockers.length > 0
@@ -757,12 +815,14 @@ function DeleteControl({
     <div className="min-w-0">
       <button
         type="button"
-        aria-disabled={blocked}
+        aria-disabled={blocked || deleting}
         aria-describedby={blocked ? 'delete-blockers' : undefined}
-        onClick={() => !blocked && setConfirming(true)}
+        onClick={() => !blocked && !deleting && setConfirming(true)}
         className={cn(
           'inline-flex h-10 items-center gap-2 text-sm font-medium',
-          blocked ? 'cursor-not-allowed text-red-600/50' : 'text-red-600 hover:text-red-700',
+          blocked || deleting
+            ? 'cursor-not-allowed text-red-600/50'
+            : 'text-red-600 hover:text-red-700',
         )}
       >
         <Trash2 className="size-4" strokeWidth={2} aria-hidden="true" />
@@ -778,18 +838,576 @@ function DeleteControl({
           ))}
         </ul>
       )}
-      {/* Says what would happen instead of looking live and doing nothing. */}
+      {/* Archiving takes the caregiver out of the roster; it is confirmed before
+          the write so a mis click does not remove the record. */}
       {confirming && (
-        <p
+        <div
           role="status"
           className="border-line text-ink-muted mt-2 max-w-sm rounded-lg border p-3 text-xs"
         >
-          Deleting {member.name} would remove the employment record, the
-          credentials and the availability. Nothing has been removed — this
-          build has no server.
-        </p>
+          <p>
+            Archiving {member.name} removes them from the roster. This cannot be
+            undone here.
+          </p>
+          {deleteError && <p className="mt-2 font-medium text-red-700">{deleteError}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={deleting}
+              className="border-line bg-surface text-ink hover:bg-sunken inline-flex h-9 items-center rounded-lg border px-3 text-xs font-medium disabled:opacity-60"
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {deleting && (
+                <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden="true" />
+              )}
+              {deleting ? 'Archiving…' : 'Archive caregiver'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
+/* -------------------------------- token list ------------------------------- */
+
+function TokenList({
+  label,
+  addLabel,
+  placeholder,
+  values,
+  error,
+  onChange,
+}: {
+  label: string
+  /** The link that opens the add box, e.g. "Add Skill". */
+  addLabel: string
+  placeholder: string
+  values: string[]
+  error?: string
+  onChange: (next: string[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const [notice, setNotice] = useState('')
+  const [adding, setAdding] = useState(false)
+  const listId = `tokens-${label.toLowerCase()}`
+  const errorId = `${listId}-error`
+
+  const add = () => {
+    const value = draft.trim()
+    if (!value) return
+    // Case-insensitive: "english" beside "English" is the same language, and
+    // silently emptying the box gave the user no way to tell what happened.
+    if (values.some((v) => v.toLowerCase() === value.toLowerCase())) {
+      setNotice(`${value} is already in the list.`)
+      return
+    }
+    onChange([...values, value])
+    setNotice(`${value} added.`)
+    setDraft('')
+  }
+
+  const remove = (value: string) => {
+    onChange(values.filter((v) => v !== value))
+    setNotice(`${value} removed.`)
+  }
+
+  return (
+    <fieldset className="min-w-0">
+      <legend className="text-ink-muted mb-2 text-sm font-medium">{label}</legend>
+      <ul className="flex flex-wrap gap-2">
+        {values.map((value) => (
+          <li key={value}>
+            <span className="bg-brand-50 text-brand-700 inline-flex items-center gap-1 rounded-full py-1 pr-1 pl-3 text-sm">
+              {value}
+              <button
+                type="button"
+                onClick={() => remove(value)}
+                className="text-brand-600 hover:text-brand-800 grid size-6 place-items-center rounded-full"
+              >
+                <CircleX className="size-4" strokeWidth={2.2} aria-hidden="true" />
+                <span className="sr-only">
+                  Remove {value} from {label.toLowerCase()}
+                </span>
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {adding || error ? (
+      <div className="mt-3 flex flex-wrap gap-2">
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">{placeholder}</span>
+          <input
+            value={draft}
+            placeholder={placeholder}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            autoFocus
+            onChange={(e) => {
+              setNotice('')
+              setDraft(e.target.value)
+            }}
+            // Enter inside a form submits it; here it should add the token.
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                add()
+              }
+            }}
+            className={cn(fieldControl, 'min-w-40')}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={add}
+          className="border-control text-ink hover:bg-sunken inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium"
+        >
+          <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
+          Add
+          <span className="sr-only"> to {label.toLowerCase()}</span>
+        </button>
+      </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="text-brand-700 hover:text-brand-800 mt-3 inline-flex items-center gap-1.5 text-sm font-medium"
+        >
+          <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
+          {addLabel}
+        </button>
+      )}
+
+      {error && (
+        <p id={errorId} className="mt-1 text-xs font-medium text-red-700">
+          {error}
+        </p>
+      )}
+      {/* Adding and removing a chip changes a list nobody is looking at, so
+          the outcome is announced rather than only rendered. */}
+      <p aria-live="polite" className="text-ink-subtle mt-1 text-xs">
+        {notice}
+      </p>
+    </fieldset>
+  )
+}
+
+/* ------------------------------- credentials ------------------------------- */
+
+const relationships = [
+  'Husband',
+  'Wife',
+  'Partner',
+  'Mother',
+  'Father',
+  'Sister',
+  'Brother',
+  'Son',
+  'Daughter',
+  'Friend',
+  'Other',
+]
+
+const monthYear = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+const shortMonth = (iso?: string) =>
+  iso ? monthYear.format(new Date(`${iso}T00:00:00Z`)) : '—'
+
+function Credentials({
+  values,
+  errors,
+  nextId,
+  onChange,
+}: {
+  values: FormValues
+  errors: Record<string, string | undefined>
+  /** A counter, not Date.now() — two adds in one millisecond collided. */
+  nextId: () => string
+  onChange: (next: Credential[]) => void
+}) {
+  // Rows read as a table; Edit opens one for changes underneath it.
+  const [open, setOpen] = useState<string | null>(null)
+
+  const update = (id: string, patch: Partial<Credential>) =>
+    onChange(values.credentials.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+
+  const add = () => {
+    const id = nextId()
+    onChange([
+      ...values.credentials,
+      { id, name: '', kind: 'certification', reference: '', issuedAt: '', expiresAt: '' },
+    ])
+    setOpen(id)
+  }
+
+  const cell = 'text-ink-muted px-4 py-3.5 whitespace-nowrap'
+
+  return (
+    <section aria-labelledby="edit-certifications" className="card p-5 sm:p-6">
+      <h2 id="edit-certifications" className="text-ink text-base font-semibold tracking-tight">
+        Certifications
+      </h2>
+
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Certifications table"
+        className="border-line mt-4 overflow-x-auto rounded-lg border"
+      >
+        <table className="w-full min-w-2xl text-left text-sm">
+          <thead className="border-line bg-sunken text-ink-muted border-b text-xs">
+            <tr>
+              {['Certification', 'License #', 'Issue Date', 'Expiry Date', 'Status', 'Actions'].map(
+                (col) => (
+                  <th
+                    key={col}
+                    scope="col"
+                    className={cn('px-4 py-2.5 font-medium', col === 'Actions' && 'text-right')}
+                  >
+                    {col}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody className="divide-line/70 divide-y">
+            {values.credentials.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-ink-muted px-4 py-6 text-center">
+                  No certifications on file.
+                </td>
+              </tr>
+            )}
+            {values.credentials.map((credential) => {
+              const error = errors[`credential-${credential.id}`]
+              const editing = open === credential.id || Boolean(error)
+              const state = credentialLabel(credential.expiresAt || undefined, TODAY)
+              return (
+                <Fragment key={credential.id}>
+                  <tr className={cn(error && 'bg-red-50/40')}>
+                    <th scope="row" className="text-ink px-4 py-3.5 font-semibold">
+                      {credential.name || <span className="text-ink-subtle font-normal">New certification</span>}
+                    </th>
+                    <td className={cell}>{credential.reference || '—'}</td>
+                    <td className={cell}>{shortMonth(credential.issuedAt)}</td>
+                    <td className={cell}>{shortMonth(credential.expiresAt)}</td>
+                    <td className={cell}>
+                      <span
+                        title={state.label}
+                        className={cn(
+                          'inline-flex rounded-md px-2 py-0.5 text-xs font-semibold',
+                          state.tone === 'expired'
+                            ? 'bg-red-50 text-red-700'
+                            : state.tone === 'expiring'
+                              ? 'bg-amber-50 text-amber-800'
+                              : 'bg-emerald-50 text-emerald-700',
+                        )}
+                      >
+                        {state.tone === 'expired'
+                          ? 'Expired'
+                          : state.tone === 'expiring'
+                            ? 'Renewal Due'
+                            : 'Valid'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                      <span className="inline-flex items-center gap-4">
+                        <button
+                          type="button"
+                          aria-expanded={editing}
+                          onClick={() => setOpen(editing ? null : credential.id)}
+                          className="text-brand-700 hover:text-brand-800 text-sm font-medium"
+                        >
+                          {editing ? 'Done' : 'Edit'}
+                          <span className="sr-only"> {credential.name || 'certification'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onChange(values.credentials.filter((c) => c.id !== credential.id))
+                          }
+                          className="text-sm font-medium text-red-600 hover:text-red-700"
+                        >
+                          Remove
+                          <span className="sr-only"> {credential.name || 'certification'}</span>
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                  {editing && (
+                    <tr className="bg-canvas">
+                      <td colSpan={6} className="px-4 py-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                          <Field label="Certification" error={error}>
+                            {(p) => (
+                              <input
+                                {...p}
+                                className={fieldControl}
+                                value={credential.name}
+                                onChange={(e) => update(credential.id, { name: e.target.value })}
+                              />
+                            )}
+                          </Field>
+                          <Field label="License #">
+                            {(p) => (
+                              <input
+                                {...p}
+                                className={fieldControl}
+                                value={credential.reference ?? ''}
+                                onChange={(e) =>
+                                  update(credential.id, { reference: e.target.value })
+                                }
+                              />
+                            )}
+                          </Field>
+                          <Field label="Issue Date">
+                            {(p) => (
+                              <input
+                                {...p}
+                                type="date"
+                                className={fieldControl}
+                                value={credential.issuedAt ?? ''}
+                                onChange={(e) =>
+                                  update(credential.id, { issuedAt: e.target.value })
+                                }
+                              />
+                            )}
+                          </Field>
+                          <Field label="Expiry Date" error={error}>
+                            {(p) => (
+                              <input
+                                {...p}
+                                type="date"
+                                className={fieldControl}
+                                value={credential.expiresAt ?? ''}
+                                onChange={(e) =>
+                                  update(credential.id, { expiresAt: e.target.value })
+                                }
+                              />
+                            )}
+                          </Field>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        type="button"
+        onClick={add}
+        className="border-control text-ink hover:bg-sunken mt-4 inline-flex h-10 items-center gap-1.5 rounded-lg border px-4 text-sm font-medium"
+      >
+        <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
+        Add Certification
+      </button>
+    </section>
+  )
+}
+
+/* ------------------------------- availability ------------------------------ */
+
+function Availability({
+  values,
+  errors,
+  offered,
+  onChange,
+  onMax,
+  onShift,
+  maxError,
+}: {
+  values: FormValues
+  errors: Record<string, string | undefined>
+  offered: number
+  onChange: (next: FormValues['availability']) => void
+  onMax: (next: string) => void
+  onShift: (next: Shift) => void
+  maxError?: string
+}) {
+  const windowFor = (day: Weekday) => values.availability.find((w) => w.day === day)
+  const [editingDay, setEditingDay] = useState<Weekday | null>(null)
+
+  const toggle = (day: Weekday) => {
+    const existing = windowFor(day)
+    if (existing) {
+      onChange(values.availability.filter((w) => w.day !== day))
+      return
+    }
+    onChange([...values.availability, { day, start: '09:00', end: '17:00' }])
+    setEditingDay(day)
+  }
+
+  const update = (day: Weekday, patch: Partial<FormValues['availability'][number]>) =>
+    onChange(values.availability.map((w) => (w.day === day ? { ...w, ...patch } : w)))
+
+  const max = Number(values.maxHoursPerWeek)
+  const over = !Number.isNaN(max) && max > 0 && offered > max
+
+  return (
+    <section aria-labelledby="edit-availability" className="card p-5 sm:p-6">
+      <h2 id="edit-availability" className="text-ink text-base font-semibold tracking-tight">
+        Availability Preferences
+      </h2>
+      <fieldset className="mt-4">
+        <legend className="text-ink-muted mb-2 text-sm font-medium">
+          Weekly Availability Grid
+        </legend>
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+          {weekdays.map((day) => {
+            const window = windowFor(day)
+            const error = errors[`availability-${day}`]
+            const editing = window && (editingDay === day || Boolean(error))
+            return (
+              <li
+                key={day}
+                className={cn(
+                  'min-w-0 rounded-xl border px-3.5 py-3',
+                  error
+                    ? 'border-red-300 bg-red-50/40'
+                    : window
+                      ? 'border-brand-500 bg-brand-50/50'
+                      : 'border-line bg-sunken',
+                )}
+              >
+                {/* The dot is the switch: a real checkbox under it. */}
+                <label className="flex cursor-pointer items-center justify-between gap-2">
+                  <span
+                    className={cn(
+                      'text-base font-semibold',
+                      window ? 'text-brand-700' : 'text-ink-muted',
+                    )}
+                  >
+                    {day}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(window)}
+                    onChange={() => toggle(day)}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'size-2.5 rounded-full peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-600',
+                      window ? 'bg-emerald-500' : 'bg-ink-subtle',
+                    )}
+                  />
+                  <span className="sr-only">Available on {day}</span>
+                </label>
+
+                <p className={cn('mt-2 text-xs', window ? 'text-ink-muted' : 'text-ink-subtle')}>
+                  Hours
+                </p>
+                {!window ? (
+                  <p className="text-ink-subtle text-sm font-semibold">Not Available</p>
+                ) : editing ? (
+                  <div className="mt-1 space-y-1.5">
+                    <label className="block">
+                      <span className="sr-only">{day} start time</span>
+                      <input
+                        type="time"
+                        value={window.start}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={error ? `availability-${day}` : undefined}
+                        onChange={(e) => update(day, { start: e.target.value })}
+                        className="border-control focus:border-brand-500 h-8 w-full rounded-md border bg-white px-2 text-xs"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="sr-only">{day} finish time</span>
+                      <input
+                        type="time"
+                        value={window.end}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={error ? `availability-${day}` : undefined}
+                        onChange={(e) => update(day, { end: e.target.value })}
+                        className="border-control focus:border-brand-500 h-8 w-full rounded-md border bg-white px-2 text-xs"
+                      />
+                    </label>
+                    {!error && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingDay(null)}
+                        className="text-brand-700 text-xs font-medium"
+                      >
+                        Done
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditingDay(day)}
+                    className="text-ink hover:text-brand-700 text-left text-sm font-semibold"
+                  >
+                    {formatTime(window.start)} - {formatTime(window.end)}
+                    <span className="sr-only">, change {day} hours</span>
+                  </button>
+                )}
+
+                {error && (
+                  <p id={`availability-${day}`} className="mt-1 text-xs font-medium text-red-700">
+                    {error}
+                  </p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </fieldset>
+
+      <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+        <Field
+          label="Maximum Hours Per Week"
+          error={maxError}
+          hint={
+            over
+              ? `The grid above offers ${offered} hours — ${offered - max} beyond this.`
+              : undefined
+          }
+        >
+          {(p) => (
+            <input
+              {...p}
+              inputMode="numeric"
+              className={fieldControl}
+              value={values.maxHoursPerWeek}
+              onChange={(e) => onMax(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Preferred Shift">
+          {(p) => (
+            <SelectBox
+              {...p}
+              className={fieldControl}
+              value={values.preferredShift}
+              onChange={(e) => onShift(e.target.value as Shift)}
+            >
+              {shifts.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </SelectBox>
+          )}
+        </Field>
+      </div>
+    </section>
+  )
+}

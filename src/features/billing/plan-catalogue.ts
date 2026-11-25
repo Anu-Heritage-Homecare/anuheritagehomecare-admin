@@ -116,7 +116,7 @@ export function rateRows(plan: Plan): PricingRow[] {
     {
       id: 'base',
       label: 'Base rate',
-      value: `${formatMoney(unitRate[plan.model])} / ${per}`,
+      value: `${formatMoney(unitRate[plan.model], 'NGN')} / ${per}`,
       hint:
         plan.model === 'per-visit'
           ? `One visit is ${VISIT_HOURS} attended hours`
@@ -128,7 +128,7 @@ export function rateRows(plan: Plan): PricingRow[] {
     {
       id: 'emergency',
       label: 'Emergency dispatch',
-      value: `${formatMoney(emergencyRate(plan))} / ${per}`,
+      value: `${formatMoney(emergencyRate(plan), 'NGN')} / ${per}`,
       hint: `${Math.round(EMERGENCY_UPLIFT * 100)}% above base${
         isRounded(unitRate[plan.model] * (1 + EMERGENCY_UPLIFT))
           ? ', rounded to the naira'
@@ -138,7 +138,7 @@ export function rateRows(plan: Plan): PricingRow[] {
     {
       id: 'weekend',
       label: 'Weekend premium',
-      value: `${formatMoney(weekendRate(plan))} / ${per}`,
+      value: `${formatMoney(weekendRate(plan), 'NGN')} / ${per}`,
       hint: `${Math.round(WEEKEND_UPLIFT * 100)}% above base${
         isRounded(unitRate[plan.model] * (1 + WEEKEND_UPLIFT))
           ? ', rounded to the naira'
@@ -158,8 +158,8 @@ export function rateRows(plan: Plan): PricingRow[] {
     {
       id: 'list',
       label: 'Monthly list price',
-      value: formatMoney(plan.monthlyPrice),
-      hint: `${plan.unitsPerMonth} × ${formatMoney(unitRate[plan.model])}`,
+      value: formatMoney(plan.monthlyPrice, 'NGN'),
+      hint: `${plan.unitsPerMonth} × ${formatMoney(unitRate[plan.model], 'NGN')}`,
     },
   ]
 }

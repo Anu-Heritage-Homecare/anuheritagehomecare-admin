@@ -84,6 +84,7 @@ export function createCredit(input: {
     accountId: invoice.accountId,
     invoice: invoice.number,
     amount,
+    currency: 'NGN',
     at: TODAY,
     status: 'pending',
     reason: input.note || input.reason,

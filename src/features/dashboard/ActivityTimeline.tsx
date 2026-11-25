@@ -1,9 +1,9 @@
-import { activity } from './data'
+import type { ActivityEntry } from './data'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { toneChip } from '@/lib/tone'
 import { cn } from '@/lib/cn'
 
-export function ActivityTimeline() {
+export function ActivityTimeline({ activity }: { activity: ActivityEntry[] }) {
   return (
     <section aria-labelledby="recent-activity">
       <SectionHeading id="recent-activity" title="Recent Activity Timeline" />

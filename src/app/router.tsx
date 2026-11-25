@@ -1,9 +1,11 @@
-import type { ComponentType } from 'react'
+import { lazy, Suspense, type ComponentType } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { RouteFallback } from '@/components/layout/RouteFallback'
 import { RouteError } from '@/components/layout/RouteError'
 import { AdminLayout } from '@/components/layout/AdminLayout'
+import { RequireAuth } from '@/components/layout/RequireAuth'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
 /*
@@ -19,20 +21,41 @@ const lazyRoute =
   <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) =>
   async () => ({ Component: (await load())[name] })
 
+// The invoice wizard sits outside the shell, so it cannot inherit the layout's
+// RequireAuth guard; wrap it directly while keeping the chunk code split.
+const CreateInvoicePage = lazy(() =>
+  import('@/pages/CreateInvoicePage').then((m) => ({ default: m.CreateInvoicePage })),
+)
+
 export const router = createBrowserRouter([
+  {
+    // Sign in, full-screen and outside the authenticated shell.
+    path: '/login',
+    element: <LoginPage />,
+    errorElement: <RouteError />,
+  },
   /*
    * The invoice wizard is full-screen, outside the admin shell, as the design
    * draws it. A static path, so it outranks billing/invoices/:number.
    */
   {
     path: '/billing/invoices/new',
-    HydrateFallback: RouteFallback,
     errorElement: <RouteError />,
-    lazy: lazyRoute(() => import('@/pages/CreateInvoicePage'), 'CreateInvoicePage'),
+    element: (
+      <RequireAuth>
+        <Suspense fallback={<RouteFallback />}>
+          <CreateInvoicePage />
+        </Suspense>
+      </RequireAuth>
+    ),
   },
   {
     path: '/',
-    element: <AdminLayout />,
+    element: (
+      <RequireAuth>
+        <AdminLayout />
+      </RequireAuth>
+    ),
     // Without this the shell renders null while a lazy chunk loads, so a cold
     // deep link is a blank page rather than a skeleton.
     HydrateFallback: RouteFallback,

@@ -2,14 +2,15 @@
  * Notification settings — which alerts go out by email, SMS and push, when
  * visit reminders fire, and who an emergency reaches.
  *
- * Content follows the Figma settings-notifications screen as drawn. Nothing in
- * the app sends an email, a text or a push, so these record how the
- * organisation wants to be notified; they are also separate from the
- * notification switches on the Billing and Message settings screens.
- *
- * Held in memory for the session, like every other settings store in the app.
+ * Live backend data (`GET /admin/notifications`), mapped into the shapes the
+ * page renders, with mutations that write back and refetch. The backend models
+ * only the per channel toggles, the visit reminder timing, the emergency alert
+ * routing and the SMS provider name; the client only channel config that used
+ * to live here (email sender name and reply to, SMS sender id, push sound and
+ * preview) has no backend source and is no longer kept.
  */
-import { useSyncExternalStore } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 
 export type Channel = 'email' | 'sms' | 'push'
 
@@ -23,6 +24,7 @@ export interface NotificationRule {
 export const smsProviders = ['Termii', 'Twilio', "Africa's Talking"] as const
 export type SmsProvider = (typeof smsProviders)[number]
 
+/** Kept for callers that still describe the channel config shape; unmodelled. */
 export interface ChannelConfig {
   email: { senderName: string; replyTo: string }
   sms: { provider: SmsProvider; senderId: string }
@@ -45,91 +47,163 @@ export interface EmergencyAlerts {
   triggers: string[]
 }
 
-interface NotificationSettings {
+/* --------------------------- backend response ----------------------------- */
+
+type NotificationChannelEnum = 'EMAIL' | 'SMS' | 'PUSH'
+
+interface ToggleDto {
+  key: string
+  label: string
+  description: string
+  enabled: boolean
+}
+
+interface ChannelDto {
+  channel: NotificationChannelEnum
+  types: ToggleDto[]
+}
+
+interface VisitRemindersDto {
+  caregiverReminderMinutes: number
+  familyNotificationMinutes: number
+  coordinatorLateMinutes: number
+}
+
+interface TriggerDto {
+  key: string
+  label: string
+}
+
+interface EmergencyAlertsDto {
+  recipients: string[]
+  channels: NotificationChannelEnum[]
+  triggers: string[]
+  availableTriggers: TriggerDto[]
+}
+
+interface SmsProviderDto {
+  name: string | null
+  connected: boolean
+}
+
+interface NotificationsResponseDto {
+  channels: ChannelDto[]
+  visitReminders: VisitRemindersDto
+  emergencyAlerts: EmergencyAlertsDto
+  smsProvider: SmsProviderDto
+}
+
+/** The settings, mapped to the shapes the page renders. */
+export interface NotificationsView {
   rules: Record<Channel, NotificationRule[]>
-  config: ChannelConfig
   reminders: ReminderRules
   emergency: EmergencyAlerts
+  availableTriggers: string[]
+  smsProvider: { name: string | null; connected: boolean }
 }
 
-const rule = (id: string, label: string, hint: string, on = true): NotificationRule => ({ id, label, hint, on })
+/* -------------------------------- mapping --------------------------------- */
 
-const state: NotificationSettings = {
-  rules: {
-    email: [
-      rule('visit-assigned', 'New visit assigned', 'Notify caregiver when a new visit is confirmed'),
-      rule('visit-cancelled', 'Visit cancelled', 'Send immediate update if a visit schedule changes'),
-      rule('payment-received', 'Payment received', 'Send confirmation on invoice settlements'),
-      rule('invoice-overdue', 'Invoice overdue', 'Alert when net payment window passes'),
-      rule('new-message', 'New message', 'Direct alert on internal messaging platform'),
-      rule('weekly-digest', 'Weekly digest', 'Summary report of operations & metrics'),
-      rule('system-updates', 'System updates', 'Technical maintenance & releases alert', false),
-    ],
-    sms: [
-      rule('visit-reminders', 'Visit reminders', 'Sent 1 hour before scheduled start'),
-      rule('emergency-alerts', 'Emergency alerts', 'Critical dispatch signals for coordinators'),
-      rule('payment-confirmations', 'Payment confirmations', 'Settlement validation texts'),
-      rule('shift-changes', 'Shift changes', 'Roster reallocation details'),
-    ],
-    push: [
-      rule('visit-updates', 'Real-time visit updates', 'Instant caregiver clock-in/out reports'),
-      rule('chat-messages', 'Chat messages', 'In-app discussion pathways'),
-      rule('task-reminders', 'Task reminders', 'Care task execution checklists'),
-      rule('approval-requests', 'Approval requests', 'Coordinator validation tasks'),
-    ],
-  },
-  config: {
-    email: { senderName: 'CareProfs', replyTo: 'support@careprofs.ng' },
-    sms: { provider: 'Termii', senderId: 'CareProfs' },
-    push: { sound: true, preview: true },
-  },
-  reminders: { caregiverMinutes: 60, familyMinutes: 30, lateMinutes: 15 },
-  emergency: {
-    recipients: ['All Coordinators', 'Medical Director', 'Branch Manager'],
-    channels: ['SMS', 'Push', 'Email'],
-    triggers: ['SOS Button', 'Missed Check-in (30m)', 'Incident Report'],
-  },
+const CHANNEL_FROM_ENUM: Record<NotificationChannelEnum, Channel> = {
+  EMAIL: 'email',
+  SMS: 'sms',
+  PUSH: 'push',
+}
+const CHANNEL_TO_ENUM: Record<Channel, NotificationChannelEnum> = {
+  email: 'EMAIL',
+  sms: 'SMS',
+  push: 'PUSH',
 }
 
-let revision = 0
-const listeners = new Set<() => void>()
-
-function emit(): void {
-  revision += 1
-  for (const l of listeners) l()
+// The emergency card shows the title case channel labels; the backend speaks
+// the enum. These map between the two in each direction.
+const CHANNEL_DISPLAY: Record<NotificationChannelEnum, string> = {
+  EMAIL: 'Email',
+  SMS: 'SMS',
+  PUSH: 'Push',
+}
+const CHANNEL_DISPLAY_TO_ENUM: Record<string, NotificationChannelEnum> = {
+  Email: 'EMAIL',
+  SMS: 'SMS',
+  Push: 'PUSH',
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-export function useNotificationSettings(): NotificationSettings {
-  useSyncExternalStore(subscribe, () => revision, () => revision)
-  return state
-}
-
-export function setRule(channel: Channel, id: string, on: boolean): void {
-  state.rules = {
-    ...state.rules,
-    [channel]: state.rules[channel].map((r) => (r.id === id ? { ...r, on } : r)),
+function toView(dto: NotificationsResponseDto): NotificationsView {
+  const rules: Record<Channel, NotificationRule[]> = { email: [], sms: [], push: [] }
+  for (const group of dto.channels) {
+    rules[CHANNEL_FROM_ENUM[group.channel]] = group.types.map((t) => ({
+      id: t.key,
+      label: t.label,
+      hint: t.description,
+      on: t.enabled,
+    }))
   }
-  emit()
+
+  return {
+    rules,
+    reminders: {
+      caregiverMinutes: dto.visitReminders.caregiverReminderMinutes,
+      familyMinutes: dto.visitReminders.familyNotificationMinutes,
+      lateMinutes: dto.visitReminders.coordinatorLateMinutes,
+    },
+    emergency: {
+      recipients: dto.emergencyAlerts.recipients,
+      channels: dto.emergencyAlerts.channels.map((c) => CHANNEL_DISPLAY[c]),
+      triggers: dto.emergencyAlerts.triggers,
+    },
+    availableTriggers: dto.emergencyAlerts.availableTriggers.map((t) => t.label),
+    smsProvider: { name: dto.smsProvider.name, connected: dto.smsProvider.connected },
+  }
 }
 
-export function setConfig<C extends Channel>(channel: C, value: ChannelConfig[C]): void {
-  state.config = { ...state.config, [channel]: value }
-  emit()
+const QUERY_KEY = ['admin', 'notifications'] as const
+
+export function useNotificationSettings() {
+  return useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: async () => toView(await api.get<NotificationsResponseDto>('/admin/notifications')),
+  })
 }
 
-export function setReminders(reminders: ReminderRules): void {
-  state.reminders = reminders
-  emit()
-}
+export function useNotificationMutations() {
+  const queryClient = useQueryClient()
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: QUERY_KEY })
+  }
 
-export function setEmergency(emergency: EmergencyAlerts): void {
-  state.emergency = emergency
-  emit()
+  const setToggle = useMutation({
+    mutationFn: ({ channel, key, enabled }: { channel: Channel; key: string; enabled: boolean }) =>
+      api.put(`/admin/notifications/toggles/${CHANNEL_TO_ENUM[channel]}/${key}`, { enabled }),
+    onSuccess: invalidate,
+  })
+
+  const setReminders = useMutation({
+    mutationFn: (reminders: ReminderRules) =>
+      api.put('/admin/notifications/visit-reminders', {
+        caregiverReminderMinutes: reminders.caregiverMinutes,
+        familyNotificationMinutes: reminders.familyMinutes,
+        coordinatorLateMinutes: reminders.lateMinutes,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const setEmergency = useMutation({
+    mutationFn: (emergency: EmergencyAlerts) =>
+      api.put('/admin/notifications/emergency-alerts', {
+        recipients: emergency.recipients,
+        channels: emergency.channels.map((c) => CHANNEL_DISPLAY_TO_ENUM[c]),
+        triggers: emergency.triggers,
+      }),
+    onSuccess: invalidate,
+  })
+
+  const setSmsProvider = useMutation({
+    mutationFn: (name: string | null) =>
+      api.patch('/admin/notifications/sms-provider', { name }),
+    onSuccess: invalidate,
+  })
+
+  return { setToggle, setReminders, setEmergency, setSmsProvider }
 }
 
 export const leadOptions = [15, 30, 45, 60, 120, 1440]

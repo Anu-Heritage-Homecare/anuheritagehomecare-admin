@@ -1,7 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { alerts } from './data'
 import type { Alert } from './data'
-import { TODAY } from '@/lib/today'
 import type { Severity } from '@/types'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { SeverityBadge } from '@/components/ui/StatusBadge'
@@ -13,24 +11,13 @@ const accent: Record<Severity, string> = {
   medium: 'bg-amber-500',
 }
 
-export function CriticalAlerts() {
+export function CriticalAlerts({ alerts }: { alerts: Alert[] }) {
   const navigate = useNavigate()
 
-  /*
-   * The rota is loaded only when Reassign is pressed: the dashboard is in the
-   * entry chunk and the scheduling module is not. If today's rota has no such
-   * visit, the board is the next best place to fix it from.
-   */
-  const go = async (target: Alert['target']) => {
-    if (target.kind === 'path') {
-      navigate(target.to)
-      return
-    }
-    const { boardOn } = await import('@/features/scheduling/board-data')
-    const visit = boardOn(TODAY).find(
-      (v) => v.caregiverName === target.caregiver && v.recipientName === target.recipient,
-    )
-    navigate(visit ? `/scheduling/visits/${visit.id}/assign` : '/scheduling')
+  // The live dashboard always carries a destination path for an alert; fall
+  // back to the alerts board if one is ever missing.
+  const go = (target: Alert['target']) => {
+    navigate(target.kind === 'path' ? target.to : '/live-monitoring/alerts')
   }
 
   return (

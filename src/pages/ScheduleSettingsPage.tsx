@@ -1,187 +1,179 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, TriangleAlert } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 import {
-  changedCount,
-  defaultSettings,
-  formatTime,
-  hoursImpact,
-  isDirty,
-  nextOccurrence,
-} from '@/features/scheduling/settings-data'
-import type {
-  DayHours,
-  Holiday,
-  HolidayPolicy,
-  Impact,
-  RuleId,
-  ScheduleSettings,
-} from '@/features/scheduling/settings-data'
-import { holidayPolicyLabels } from '@/features/scheduling/settings-data'
+  useSchedulingSettings,
+  useSchedulingSettingsMutations,
+  type BusinessHourDay,
+  type DefaultDuration,
+  type SchedulingRules,
+  type SchedulingSettingsView,
+  type TravelSettings,
+} from '@/features/scheduling/useSchedulingSettings'
 import { Toggle } from '@/components/ui/Toggle'
 import { fieldControl } from '@/lib/field-classes'
 import { cn } from '@/lib/cn'
 import { SelectBox } from '@/components/ui/SelectBox'
-import { Drawer } from '@/components/ui/Drawer'
 
-const dayNames: Record<string, string> = {
-  Mon: 'Monday',
-  Tue: 'Tuesday',
-  Wed: 'Wednesday',
-  Thu: 'Thursday',
-  Fri: 'Friday',
-  Sat: 'Saturday',
-  Sun: 'Sunday',
+/* Working copy held apart from the loaded data so "unsaved changes" and Cancel
+   mean something exact. Business hours and durations use minutes from midnight /
+   minutes; the form shows clocks and the service's natural unit. */
+
+interface Draft {
+  businessHours: BusinessHourDay[]
+  defaultDurations: DefaultDuration[]
+  rules: SchedulingRules
+  travel: TravelSettings
 }
 
-const policyOptions: HolidayPolicy[] = ['normal', 'emergency', 'closed']
+function toDraft(data: SchedulingSettingsView): Draft {
+  return {
+    businessHours: data.businessHours.map((d) => ({ ...d })),
+    defaultDurations: data.defaultDurations.map((d) => ({ ...d })),
+    rules: { ...data.rules },
+    travel: { ...data.travel },
+  }
+}
 
-/** The Figma's holidays, in its order, with its policies. */
-const figmaHolidays: { id: string; policy: HolidayPolicy }[] = [
-  { id: 'thanksgiving', policy: 'closed' },
-  { id: 'christmas', policy: 'emergency' },
-  { id: 'new-year', policy: 'emergency' },
-  { id: 'mlk', policy: 'normal' },
+/** Minutes from midnight to a "HH:MM" value for a time input. */
+function toClock(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+}
+
+/** A "HH:MM" value to minutes from midnight. */
+function toMinute(clock: string): number {
+  const [h, m] = clock.split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
+
+const ruleRows: { id: keyof SchedulingRules; label: string }[] = [
+  { id: 'requireCertificationMatch', label: 'Require certification match for visit type' },
+  { id: 'autoAssignPreferredCaregiver', label: 'Auto-assign preferred caregiver' },
+  { id: 'allowOvertimeScheduling', label: 'Allow overtime scheduling' },
+  { id: 'requireCoordinatorApprovalForUrgent', label: 'Require coordinator approval for urgent visits' },
+  { id: 'sendRemindersOneHourBefore', label: 'Send reminders 1 hour before visit' },
+  { id: 'autoCancelUnconfirmedAfter24h', label: 'Auto-cancel unconfirmed visits after 24h' },
 ]
 
-/** The rules in the Figma's order and wording. */
-const ruleRows: { id: RuleId; label: string }[] = [
-  { id: 'certification-match', label: 'Require certification match for visit type' },
-  { id: 'auto-assign-preferred', label: 'Auto-assign preferred caregiver' },
-  { id: 'allow-overtime', label: 'Allow overtime scheduling' },
-  { id: 'approve-urgent', label: 'Require coordinator approval for urgent visits' },
-  { id: 'send-reminders', label: 'Send reminders 1 hour before visit' },
-  { id: 'auto-cancel-unconfirmed', label: 'Auto-cancel unconfirmed visits after 24h' },
+const policyOptions = [
+  { value: 'OPEN', label: 'Open' },
+  { value: 'EMERGENCY_ONLY', label: 'Emerg. Only' },
+  { value: 'CLOSED', label: 'Closed' },
 ]
 
-/** The services this screen configures, in the Figma's order and defaults. */
-const serviceDurations: { type: string; hours: number; unit: 'hours' | 'minutes' }[] = [
-  { type: 'Morning Care', hours: 2, unit: 'hours' },
-  { type: 'Afternoon Care', hours: 3, unit: 'hours' },
-  { type: 'Medication Administration', hours: 0.5, unit: 'minutes' },
-  { type: 'Physical Therapy', hours: 1.5, unit: 'hours' },
-  { type: 'Wound Care', hours: 1, unit: 'hours' },
-  { type: 'Companionship', hours: 2, unit: 'hours' },
-  { type: 'Clinical Checkup', hours: 1, unit: 'hours' },
-]
-
-/** A number box with its unit written inside it, as the Figma draws them. */
-function UnitInput({
-  id,
-  unit,
-  value,
-  min,
-  max,
-  step,
-  invalid = false,
-  onChange,
-}: {
-  id: string
-  unit: string
-  value: number
-  min: number
-  max: number
-  step: number
-  invalid?: boolean
-  onChange: (raw: string) => void
-}) {
-  return (
-    <span
-      className={cn(
-        'border-control focus-within:border-brand-500 flex h-8 w-28 shrink-0 items-center rounded-lg border px-2.5',
-        invalid && 'border-red-400',
-      )}
-    >
-      <input
-        id={id}
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        aria-invalid={invalid || undefined}
-        aria-describedby={`${id}-unit`}
-        onChange={(e) => onChange(e.target.value)}
-        className="text-ink min-w-0 flex-1 appearance-none bg-transparent text-sm tabular-nums outline-none [&::-webkit-inner-spin-button]:appearance-none"
-      />
-      <span id={`${id}-unit`} className="text-ink-subtle shrink-0 text-xs">
-        {unit}
-      </span>
-    </span>
-  )
+const policyTags: Record<string, string> = {
+  CLOSED: 'bg-red-50 text-red-600',
+  EMERGENCY_ONLY: 'bg-[#fcf3cc] text-amber-600',
+  OPEN: 'bg-brand-50 text-brand-700',
 }
 
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-}
-
-/** A cleared number input reads '', and Number('') is 0. */
-function clamp(raw: string, min: number, max: number): number {
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return min
-  return Math.min(max, Math.max(min, n))
-}
+const holidayDay = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
 
 export function ScheduleSettingsPage() {
-  // The saved state and the working copy, held apart so "6 unsaved changes"
-  // and Discard mean something exact rather than "the form has been touched".
-  const initial = useMemo(() => {
-    const base = defaultSettings()
-    return {
-      ...base,
-      // The Figma ships with overtime off.
-      rules: { ...base.rules, 'allow-overtime': false },
-      buffer: { ...base.buffer, allowBackToBack: false },
-      holidays: figmaHolidays.flatMap(({ id, policy }) => {
-        const h = base.holidays.find((x) => x.id === id)
-        return h ? [{ ...h, policy }] : []
-      }),
-      durations: Object.fromEntries(serviceDurations.map((d) => [d.type, d.hours])),
-    }
-  }, [])
-  const [saved, setSaved] = useState<ScheduleSettings>(initial)
-  const [draft, setDraft] = useState<ScheduleSettings>(initial)
-  const [savedAt, setSavedAt] = useState<string | null>(null)
-  const [addingHoliday, setAddingHoliday] = useState(false)
+  const settings = useSchedulingSettings()
+  const { save, addHoliday, removeHoliday } = useSchedulingSettingsMutations()
 
-  const types = serviceDurations.map((d) => d.type)
-  const dirty = isDirty(draft, saved)
-  const changes = changedCount(draft, saved)
+  const loaded = settings.data
+  // Seed the working copy from the loaded data; re-seed (during render, no
+  // effect) whenever a fresh fetch replaces the data object.
+  const [state, setState] = useState<{ source: SchedulingSettingsView; draft: Draft } | null>(null)
+  if (loaded && state?.source !== loaded) {
+    setState({ source: loaded, draft: toDraft(loaded) })
+  }
+  const draft = state?.draft ?? null
+  const setDraft = (next: Draft | ((d: Draft) => Draft)) =>
+    setState((s) =>
+      s === null ? s : { source: s.source, draft: typeof next === 'function' ? next(s.draft) : next },
+    )
 
-  // Save is not offered over a form that cannot be true: a day that closes
-  // before it opens, or a service with no duration.
+  const baseline = useMemo(() => (loaded ? toDraft(loaded) : null), [loaded])
+  const dirty = Boolean(draft && baseline && JSON.stringify(draft) !== JSON.stringify(baseline))
+
+  if (settings.isPending || !draft) {
+    return (
+      <div className="text-ink-subtle flex items-center justify-center gap-2 py-24 text-sm">
+        <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+        Loading settings…
+      </div>
+    )
+  }
+  if (settings.isError) {
+    return (
+      <div className="card mx-auto mt-10 flex max-w-md flex-col items-center gap-3 p-10 text-center">
+        <p className="text-ink text-sm font-medium">Could not load Schedule Settings.</p>
+        <p className="text-ink-subtle text-sm">{settings.error.message}</p>
+        <button
+          type="button"
+          onClick={() => void settings.refetch()}
+          className="bg-brand-600 hover:bg-brand-700 h-10 rounded-lg px-4 text-sm font-semibold text-white"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
   const problems = [
-    // A cleared <input type="time"> reads '', which compares below every clock
-    // value — without this an empty opening time passed validation silently.
-    ...draft.hours
-      .filter((h) => h.open && (!h.start || !h.end))
-      .map((h) => `${dayNames[h.day] ?? h.day} is missing an opening or closing time`),
-    ...draft.hours
-      .filter((h) => h.open && h.start && h.end && h.end <= h.start)
-      .map((h) => `${dayNames[h.day] ?? h.day} closes before it opens`),
-    ...types
-      .filter((t) => !(draft.durations[t] > 0))
-      .map((t) => `${t} has no duration`),
+    ...draft.businessHours
+      .filter((h) => h.open && h.closeMinute <= h.openMinute)
+      .map((h) => `${h.weekdayLabel} closes before it opens`),
+    ...draft.defaultDurations.filter((d) => d.minutes <= 0).map((d) => `${d.label} has no duration`),
   ]
   const valid = problems.length === 0
 
-  const outsideHours = useMemo(() => hoursImpact(draft.hours), [draft.hours])
-  const patch = (next: Partial<ScheduleSettings>) =>
-    setDraft((d) => ({ ...d, ...next }))
+  const setDay = (weekday: string, next: Partial<BusinessHourDay>) =>
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            businessHours: d.businessHours.map((h) =>
+              h.weekday === weekday ? { ...h, ...next } : h,
+            ),
+          }
+        : d,
+    )
 
-  const setDay = (day: string, next: Partial<DayHours>) =>
-    patch({
-      hours: draft.hours.map((h) => (h.day === day ? { ...h, ...next } : h)),
+  const setDuration = (visitType: string, minutes: number) =>
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            defaultDurations: d.defaultDurations.map((x) =>
+              x.visitType === visitType ? { ...x, minutes } : x,
+            ),
+          }
+        : d,
+    )
+
+  const onSave = () => {
+    if (!dirty || !valid) return
+    save.mutate({
+      businessHours: draft.businessHours.map((h) => ({
+        weekday: h.weekday,
+        open: h.open,
+        openMinute: h.openMinute,
+        closeMinute: h.closeMinute,
+      })),
+      defaultDurations: draft.defaultDurations.map((d) => ({
+        visitType: d.visitType,
+        minutes: d.minutes,
+      })),
+      rules: draft.rules,
+      travel: draft.travel,
     })
+  }
 
   const actions = (
     <div className="flex shrink-0 flex-wrap items-center gap-2.5">
-      {/* Cancel throws away the draft; with nothing to throw away it
-          leaves the page. */}
       {dirty ? (
         <button
           type="button"
-          onClick={() => setDraft(saved)}
+          onClick={() => setDraft(toDraft(loaded!))}
           className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium"
         >
           Cancel
@@ -196,14 +188,11 @@ export function ScheduleSettingsPage() {
       )}
       <button
         type="button"
-        aria-disabled={!dirty || !valid}
-        onClick={() => {
-          if (!dirty || !valid) return
-          setSaved(draft)
-          setSavedAt(formatTime(nowClock()))
-        }}
-        className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-brand-600"
+        disabled={!dirty || !valid || save.isPending}
+        onClick={onSave}
+        className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white disabled:cursor-default disabled:opacity-50"
       >
+        {save.isPending && <Loader2 className="size-4 animate-spin" strokeWidth={2} />}
         Save Changes
       </button>
     </div>
@@ -226,14 +215,10 @@ export function ScheduleSettingsPage() {
               </li>
             </ol>
           </nav>
-          <h1 className="text-ink mt-1 text-2xl font-bold tracking-tight">
-            Schedule Settings
-          </h1>
+          <h1 className="text-ink mt-1 text-2xl font-bold tracking-tight">Schedule Settings</h1>
           <p className="text-ink-muted mt-1 text-sm">
             Configure scheduling rules, business hours, and visit preferences.
           </p>
-          {/* Only when there is something to say: a problem that blocks
-              saving, or confirmation that a save happened. */}
           {problems.length > 0 ? (
             <p role="status" className="mt-2 text-xs font-medium text-red-700">
               {problems[0]}
@@ -241,15 +226,18 @@ export function ScheduleSettingsPage() {
                 ` and ${problems.length - 1} other problem${problems.length === 2 ? '' : 's'}`}
               .
             </p>
+          ) : save.isError ? (
+            <p role="status" className="mt-2 text-xs font-medium text-red-700">
+              {save.error.message}
+            </p>
           ) : dirty ? (
             <p role="status" className="text-ink-subtle mt-2 text-xs">
-              {changes} unsaved change{changes === 1 ? '' : 's'} — settings last for
-              this session only.
+              Unsaved changes.
             </p>
           ) : (
-            savedAt && (
+            save.isSuccess && (
               <p role="status" className="mt-2 text-xs font-medium text-emerald-700">
-                Saved at {savedAt}
+                Settings saved.
               </p>
             )
           )}
@@ -259,58 +247,54 @@ export function ScheduleSettingsPage() {
       </header>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {/* ----------------------------- business hours ---------------------- */}
-
         <div className="space-y-4">
           <section aria-labelledby="business-hours" className="card p-5">
             <div className="border-line/70 border-b pb-4">
               <h2 id="business-hours" className="text-ink text-base font-semibold tracking-tight">
                 Business Hours
               </h2>
-              <p className="text-ink-muted mt-0.5 text-xs">
-                Define when visits can be scheduled.
-              </p>
+              <p className="text-ink-muted mt-0.5 text-xs">Define when visits can be scheduled.</p>
             </div>
 
             <ul className="mt-4 space-y-2">
-              {draft.hours.map((h) => (
+              {draft.businessHours.map((h) => (
                 <li
-                  key={h.day}
+                  key={h.weekday}
                   className={cn('rounded-lg px-2 py-2', !h.open && 'bg-sunken')}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <Toggle
                       leading
                       tone="ink"
-                      label={dayNames[h.day] ?? h.day}
+                      label={h.weekdayLabel}
                       checked={h.open}
-                      onChange={(open) => setDay(h.day, { open })}
+                      onChange={(open) => setDay(h.weekday, { open })}
                       labelClassName={h.open ? 'font-semibold' : 'text-ink-subtle font-medium'}
                       className="min-w-32 grow"
                     />
                     {h.open ? (
                       <span className="flex shrink-0 items-center gap-2">
-                        <label className="sr-only" htmlFor={`open-${h.day}`}>
-                          {dayNames[h.day]} opening time
+                        <label className="sr-only" htmlFor={`open-${h.weekday}`}>
+                          {h.weekdayLabel} opening time
                         </label>
                         <input
-                          id={`open-${h.day}`}
+                          id={`open-${h.weekday}`}
                           type="time"
-                          value={h.start}
+                          value={toClock(h.openMinute)}
                           step={900}
-                          onChange={(e) => setDay(h.day, { start: e.target.value })}
+                          onChange={(e) => setDay(h.weekday, { openMinute: toMinute(e.target.value) })}
                           className={cn(fieldControl, 'w-28 text-sm')}
                         />
                         <span className="text-ink-subtle text-xs">to</span>
-                        <label className="sr-only" htmlFor={`close-${h.day}`}>
-                          {dayNames[h.day]} closing time
+                        <label className="sr-only" htmlFor={`close-${h.weekday}`}>
+                          {h.weekdayLabel} closing time
                         </label>
                         <input
-                          id={`close-${h.day}`}
+                          id={`close-${h.weekday}`}
                           type="time"
-                          value={h.end}
+                          value={toClock(h.closeMinute)}
                           step={900}
-                          onChange={(e) => setDay(h.day, { end: e.target.value })}
+                          onChange={(e) => setDay(h.weekday, { closeMinute: toMinute(e.target.value) })}
                           className={cn(fieldControl, 'w-28 text-sm')}
                         />
                       </span>
@@ -318,12 +302,7 @@ export function ScheduleSettingsPage() {
                       <span className="text-ink-subtle shrink-0 pr-1 text-sm">Closed</span>
                     )}
                   </div>
-                  {h.open && (!h.start || !h.end) && (
-                    <p className="mt-1.5 text-xs font-medium text-red-700">
-                      Both an opening and a closing time are required.
-                    </p>
-                  )}
-                  {h.open && h.start && h.end && h.end <= h.start && (
+                  {h.open && h.closeMinute <= h.openMinute && (
                     <p className="mt-1.5 text-xs font-medium text-red-700">
                       Closing time must be after opening time.
                     </p>
@@ -331,15 +310,7 @@ export function ScheduleSettingsPage() {
                 </li>
               ))}
             </ul>
-
-            <ImpactNote
-              impact={outsideHours}
-              lead="visit"
-              tail="already booked outside these hours"
-            />
           </section>
-
-          {/* ------------------------------- rules ---------------------------- */}
 
           <section aria-labelledby="scheduling-rules" className="card p-5">
             <div className="border-line/70 border-b pb-4">
@@ -358,7 +329,9 @@ export function ScheduleSettingsPage() {
                     label={label}
                     checked={draft.rules[id]}
                     solidOff
-                    onChange={(next) => patch({ rules: { ...draft.rules, [id]: next } })}
+                    onChange={(next) =>
+                      setDraft((d) => (d ? { ...d, rules: { ...d.rules, [id]: next } } : d))
+                    }
                     className="items-center"
                   />
                 </li>
@@ -366,8 +339,6 @@ export function ScheduleSettingsPage() {
             </ul>
           </section>
         </div>
-
-        {/* ---------------------------- durations + buffer -------------------- */}
 
         <div className="space-y-4">
           <section aria-labelledby="visit-durations" className="card p-5">
@@ -381,44 +352,33 @@ export function ScheduleSettingsPage() {
             </div>
 
             <ul className="mt-4 space-y-2.5">
-              {serviceDurations.map(({ type, unit }) => {
-                const hours = draft.durations[type] ?? 0
-                // Stored in hours; shown in the unit the service is thought of in.
-                const shown = unit === 'minutes' ? Math.round(hours * 60) : hours
-                const unitLabel = unit === 'minutes' ? 'minutes' : hours === 1 ? 'hour' : 'hours'
-                const id = `duration-${slug(type)}`
+              {draft.defaultDurations.map((d) => {
+                const id = `duration-${d.visitType}`
                 return (
-                  <li key={type} className="flex items-center justify-between gap-3">
+                  <li key={d.visitType} className="flex items-center justify-between gap-3">
                     <label htmlFor={id} className="text-ink min-w-0 text-sm break-words">
-                      {type}
+                      {d.label}
                     </label>
                     <span
                       className={cn(
                         'border-control focus-within:border-brand-500 flex h-8 w-28 shrink-0 items-center rounded-lg border px-2.5',
-                        !(hours > 0) && 'border-red-400',
+                        d.minutes <= 0 && 'border-red-400',
                       )}
                     >
                       <input
                         id={id}
                         type="number"
-                        min={unit === 'minutes' ? 5 : 0.25}
-                        max={unit === 'minutes' ? 1440 : 24}
-                        step={unit === 'minutes' ? 5 : 0.25}
-                        value={shown}
-                        aria-invalid={hours > 0 ? undefined : true}
-                        aria-describedby={`${id}-unit`}
-                        onChange={(e) => {
-                          const next =
-                            unit === 'minutes'
-                              ? clamp(e.target.value, 0, 1440) / 60
-                              : clamp(e.target.value, 0, 24)
-                          patch({ durations: { ...draft.durations, [type]: next } })
-                        }}
+                        min={5}
+                        max={1440}
+                        step={5}
+                        value={d.minutes}
+                        aria-invalid={d.minutes > 0 ? undefined : true}
+                        onChange={(e) =>
+                          setDuration(d.visitType, Math.max(0, Math.min(1440, Number(e.target.value))))
+                        }
                         className="text-ink min-w-0 flex-1 appearance-none bg-transparent text-sm tabular-nums outline-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
-                      <span id={`${id}-unit`} className="text-ink-subtle shrink-0 text-xs">
-                        {unitLabel}
-                      </span>
+                      <span className="text-ink-subtle shrink-0 text-xs">minutes</span>
                     </span>
                   </li>
                 )
@@ -447,20 +407,22 @@ export function ScheduleSettingsPage() {
                   min={0}
                   max={240}
                   step={5}
-                  value={draft.buffer.minutes}
-                  onChange={(raw) =>
-                    patch({ buffer: { ...draft.buffer, minutes: clamp(raw, 0, 240) } })
+                  value={draft.travel.minBufferMinutes}
+                  onChange={(n) =>
+                    setDraft((d) =>
+                      d ? { ...d, travel: { ...d.travel, minBufferMinutes: n } } : d,
+                    )
                   }
                 />
               </div>
 
               <Toggle
                 label="Travel time estimation"
-                checked={draft.buffer.estimateTravel}
+                checked={draft.travel.travelTimeEstimation}
                 solidOff
                 className="items-center"
-                onChange={(estimateTravel) =>
-                  patch({ buffer: { ...draft.buffer, estimateTravel } })
+                onChange={(travelTimeEstimation) =>
+                  setDraft((d) => (d ? { ...d, travel: { ...d.travel, travelTimeEstimation } } : d))
                 }
               />
 
@@ -474,26 +436,28 @@ export function ScheduleSettingsPage() {
                   min={1}
                   max={200}
                   step={1}
-                  value={draft.buffer.maxTravelMiles}
-                  onChange={(raw) =>
-                    patch({ buffer: { ...draft.buffer, maxTravelMiles: clamp(raw, 1, 200) } })
+                  value={draft.travel.maxTravelDistanceMiles}
+                  onChange={(n) =>
+                    setDraft((d) =>
+                      d ? { ...d, travel: { ...d.travel, maxTravelDistanceMiles: n } } : d,
+                    )
                   }
                 />
               </div>
 
               <Toggle
                 label="Allow back-to-back visits"
-                checked={draft.buffer.allowBackToBack}
+                checked={draft.travel.allowBackToBackVisits}
                 solidOff
                 className="items-center"
-                onChange={(allowBackToBack) =>
-                  patch({ buffer: { ...draft.buffer, allowBackToBack } })
+                onChange={(allowBackToBackVisits) =>
+                  setDraft((d) =>
+                    d ? { ...d, travel: { ...d.travel, allowBackToBackVisits } } : d,
+                  )
                 }
               />
             </div>
           </section>
-
-          {/* ------------------------------ holidays -------------------------- */}
 
           <section aria-labelledby="holiday-calendar" className="card p-5">
             <div className="border-line/70 border-b pb-4">
@@ -506,40 +470,49 @@ export function ScheduleSettingsPage() {
             </div>
 
             <ul className="mt-4 space-y-2.5">
-              {draft.holidays.map((holiday) => (
-                <HolidayRow
+              {loaded!.holidays.length === 0 && (
+                <li className="text-ink-subtle text-sm">No holidays on the calendar.</li>
+              )}
+              {loaded!.holidays.map((holiday) => (
+                <li
                   key={holiday.id}
-                  holiday={holiday}
-                  onChange={(policy) =>
-                    patch({
-                      holidays: draft.holidays.map((h) =>
-                        h.id === holiday.id ? { ...h, policy } : h,
-                      ),
-                    })
-                  }
-                />
+                  className="border-line flex items-center justify-between gap-3 rounded-lg border px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-ink block text-sm font-semibold break-words">{holiday.name}</p>
+                    <p className="text-ink-subtle mt-0.5 text-xs break-words">
+                      {holidayDay.format(new Date(`${holiday.date.slice(0, 10)}T00:00:00Z`))} ·{' '}
+                      {holiday.policyLabel}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={cn(
+                        'rounded-md px-2.5 py-1 text-xs font-semibold',
+                        policyTags[holiday.policy] ?? 'bg-sunken text-ink-muted',
+                      )}
+                    >
+                      {holiday.policyLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeHoliday.mutate(holiday.id)}
+                      disabled={removeHoliday.isPending}
+                      aria-label={`Remove ${holiday.name}`}
+                      className="text-ink-muted hover:text-red-700 disabled:opacity-50"
+                    >
+                      <Trash2 className="size-4" strokeWidth={1.9} aria-hidden="true" />
+                    </button>
+                  </div>
+                </li>
               ))}
             </ul>
 
-            <button
-              type="button"
-              onClick={() => setAddingHoliday(true)}
-              className="text-brand-600 hover:text-brand-700 mt-4 inline-flex items-center gap-2 px-1 text-sm font-medium"
-            >
-              <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
-              Add Holiday
-            </button>
-
-            <Drawer open={addingHoliday} onClose={() => setAddingHoliday(false)} title="Add holiday" placement="center">
-              <AddHolidayForm
-                existing={draft.holidays}
-                onAdd={(holiday) => {
-                  patch({ holidays: [...draft.holidays, holiday] })
-                  setAddingHoliday(false)
-                }}
-                onCancel={() => setAddingHoliday(false)}
-              />
-            </Drawer>
+            <AddHolidayForm
+              pending={addHoliday.isPending}
+              error={addHoliday.isError ? addHoliday.error.message : null}
+              onAdd={(input) => addHoliday.mutate(input)}
+            />
           </section>
         </div>
       </div>
@@ -549,191 +522,119 @@ export function ScheduleSettingsPage() {
   )
 }
 
-function nowClock(): string {
-  const d = new Date()
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-/* --------------------------------- pieces ---------------------------------- */
-
-
-const holidayDay = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-const policyNotes: Record<HolidayPolicy, string> = {
-  closed: 'No regular visits',
-  emergency: 'Emergency only',
-  normal: 'Normal operations',
-}
-
-const policyTags: Record<HolidayPolicy, { label: string; className: string }> = {
-  closed: { label: 'Closed', className: 'bg-red-50 text-red-600' },
-  emergency: { label: 'Emerg. Only', className: 'bg-[#fcf3cc] text-amber-600' },
-  normal: { label: 'Open', className: 'bg-brand-50 text-brand-700' },
-}
-
-function HolidayRow({
-  holiday,
+function UnitInput({
+  id,
+  unit,
+  value,
+  min,
+  max,
+  step,
   onChange,
 }: {
-  holiday: Holiday
-  onChange: (policy: HolidayPolicy) => void
+  id: string
+  unit: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (n: number) => void
 }) {
-  // Computed from the holiday's rule, so the weekday and date always agree.
-  const date = nextOccurrence(holiday)
-  const id = `holiday-${holiday.id}`
-  const tag = policyTags[holiday.policy]
-
   return (
-    <li className="border-line flex items-center justify-between gap-3 rounded-lg border px-4 py-3">
-      <div className="min-w-0">
-        <label htmlFor={id} className="text-ink block text-sm font-semibold break-words">
-          {holiday.name}
-        </label>
-        <p className="text-ink-subtle mt-0.5 text-xs break-words">
-          {holidayDay.format(new Date(`${date}T00:00:00Z`))} • {policyNotes[holiday.policy]}
-        </p>
-      </div>
-      {/* The tag is the control: a native select drawn as the Figma's badge. */}
-      <SelectBox
+    <span className="border-control focus-within:border-brand-500 flex h-8 w-28 shrink-0 items-center rounded-lg border px-2.5">
+      <input
         id={id}
-        value={holiday.policy}
-        onChange={(e) => onChange(e.target.value as HolidayPolicy)}
-        className={cn(
-          'shrink-0 cursor-pointer appearance-none rounded-md px-2.5 py-1 text-center text-xs font-semibold [field-sizing:content] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
-          tag.className,
-        )}
-      >
-        {policyOptions.map((p) => (
-          <option key={p} value={p}>
-            {policyTags[p].label}
-          </option>
-        ))}
-      </SelectBox>
-    </li>
-  )
-}
-
-
-function ImpactNote({
-  id,
-  impact,
-  lead,
-  plural,
-  tail,
-}: {
-  id?: string
-  impact: Impact
-  lead: string
-  plural?: string
-  tail: string
-}) {
-  if (impact.count === 0) return null
-  const noun = impact.count === 1 ? lead : (plural ?? `${lead}s`)
-
-  return (
-    <p
-      id={id}
-      className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
-    >
-      <TriangleAlert
-        className="mt-0.5 size-3.5 shrink-0"
-        strokeWidth={2.4}
-        aria-hidden="true"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))}
+        className="text-ink min-w-0 flex-1 appearance-none bg-transparent text-sm tabular-nums outline-none [&::-webkit-inner-spin-button]:appearance-none"
       />
-      <span className="min-w-0 break-words">
-        <span className="font-semibold">
-          {impact.count} {noun} {tail}.
-        </span>{' '}
-        {impact.examples.join('; ')}
-        {impact.count > impact.examples.length && ' and others'}.
-      </span>
-    </p>
+      <span className="text-ink-subtle shrink-0 text-xs">{unit}</span>
+    </span>
   )
 }
-
-const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'] as const
-const holidayPolicies: HolidayPolicy[] = ['normal', 'emergency', 'closed']
-
-let holidaySeq = 0
 
 function AddHolidayForm({
-  existing,
+  pending,
+  error,
   onAdd,
-  onCancel,
 }: {
-  existing: Holiday[]
-  onAdd: (holiday: Holiday) => void
-  onCancel: () => void
+  pending: boolean
+  error: string | null
+  onAdd: (input: { name: string; date: string; policy: string }) => void
 }) {
+  const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [month, setMonth] = useState(1)
-  const [day, setDay] = useState(1)
-  const [policy, setPolicy] = useState<HolidayPolicy>('emergency')
-  const daysInMonth = new Date(Date.UTC(2026, month, 0)).getUTCDate()
-  const safeDay = Math.min(day, daysInMonth)
-  const clash = existing.some((h) => h.name.toLowerCase() === name.trim().toLowerCase())
-  const valid = name.trim() !== '' && !clash
+  const [date, setDate] = useState('')
+  const [policy, setPolicy] = useState('OPEN')
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-brand-600 hover:text-brand-700 mt-4 inline-flex items-center gap-2 px-1 text-sm font-medium"
+      >
+        <Plus className="size-4" strokeWidth={2.4} aria-hidden="true" />
+        Add Holiday
+      </button>
+    )
+  }
+
+  const valid = name.trim() !== '' && /^\d{4}-\d{2}-\d{2}$/.test(date)
 
   return (
-    <form
-      className="space-y-4 p-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!valid) return
-        holidaySeq += 1
-        onAdd({
-          id: `custom-${holidaySeq}`,
-          name: name.trim(),
-          policy,
-          rule: { kind: 'fixed', month, day: safeDay },
-        })
-      }}
-    >
-      <label className="block">
-        <span className="text-ink text-sm font-medium">Holiday name</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Founders' Day" className={cn(fieldControl, 'mt-1.5')} />
-        {clash && <span className="mt-1 block text-xs text-red-700">A holiday with this name already exists.</span>}
-      </label>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="text-ink text-sm font-medium">Month</span>
-          <SelectBox value={String(month)} onChange={(e) => setMonth(Number(e.target.value))} className={cn(fieldControl, 'mt-1.5')}>
-            {monthNames.map((m, i) => (
-              <option key={m} value={i + 1}>{m}</option>
-            ))}
-          </SelectBox>
-        </label>
-        <label className="block">
-          <span className="text-ink text-sm font-medium">Day</span>
-          <SelectBox value={String(safeDay)} onChange={(e) => setDay(Number(e.target.value))} className={cn(fieldControl, 'mt-1.5')}>
-            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </SelectBox>
-        </label>
-      </div>
-      <label className="block">
-        <span className="text-ink text-sm font-medium">Policy</span>
-        <SelectBox value={policy} onChange={(e) => setPolicy(e.target.value as HolidayPolicy)} className={cn(fieldControl, 'mt-1.5')}>
-          {holidayPolicies.map((pp) => (
-            <option key={pp} value={pp}>{holidayPolicyLabels[pp]}</option>
+    <div className="border-line mt-4 space-y-2 rounded-lg border p-3">
+      <input
+        type="text"
+        value={name}
+        maxLength={200}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Holiday name"
+        className={cn(fieldControl, 'text-sm')}
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className={cn(fieldControl, 'w-40 text-sm')}
+        />
+        <SelectBox value={policy} onChange={(e) => setPolicy(e.target.value)} className={cn(fieldControl, 'w-40 text-sm')}>
+          {policyOptions.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
           ))}
         </SelectBox>
-      </label>
-      <p className="text-ink-subtle text-xs">Added to the draft; use Save Changes to keep it.</p>
-      <div className="flex justify-end gap-2 pt-1">
-        <button type="button" onClick={onCancel} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+      </div>
+      {error && <p className="text-xs font-medium text-red-700">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={!valid || pending}
+          onClick={() =>
+            onAdd({ name: name.trim(), date, policy })
+          }
+          className="bg-brand-600 hover:bg-brand-700 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {pending && <Loader2 className="size-4 animate-spin" strokeWidth={2} />}
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false)
+            setName('')
+            setDate('')
+          }}
+          className="border-control text-ink hover:bg-sunken inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium"
+        >
           Cancel
         </button>
-        <button type="submit" disabled={!valid} className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
-          Add Holiday
-        </button>
       </div>
-    </form>
+    </div>
   )
 }

@@ -37,6 +37,8 @@ export interface Adjustment {
   final?: boolean
   /** Always positive; `kind` and `direction` say which way it moves the balance. */
   amount: number
+  /** ISO currency code for `amount`. Mock fixtures are NGN. */
+  currency: string
   /**
    * Adjustments only: `increase` adds to the invoice (a missed charge),
    * `decrease` takes off it (a discount). Credits and write-offs always decrease.
@@ -116,6 +118,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-musa',
     invoice: 'INV-2026-143',
     amount: 600,
+    currency: 'NGN',
     at: '2026-06-10',
     status: 'applied',
     reason: 'Visit log checked: 2 of the 18 visits billed for 1–15 May did not take place. Credited against the invoice.',
@@ -128,6 +131,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-eze',
     invoice: 'INV-2026-160',
     amount: 300,
+    currency: 'NGN',
     at: '2026-07-23',
     status: 'pending',
     reason: 'One visit on 9 Jul was cut short. Mrs. Eze raised it when reminded of the invoice.',
@@ -140,6 +144,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-cr-001',
     invoice: 'INV-2026-089',
     amount: 240,
+    currency: 'NGN',
     at: '2026-07-18',
     status: 'rejected',
     reason: 'Requested for a late arrival on 3 Jul.',
@@ -153,6 +158,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-cr-007',
     txId: 'TX-2026-908',
     amount: 6600,
+    currency: 'NGN',
     at: '2026-07-24',
     status: 'pending',
     reason: 'Family asks whether the renewal can be refunded while they consider moving to invoice billing.',
@@ -165,6 +171,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-adeyemi',
     txId: 'TX-2026-897',
     amount: 300,
+    currency: 'NGN',
     at: '2026-07-12',
     status: 'rejected',
     reason: 'Account holder believed the transfer was one visit over.',
@@ -178,6 +185,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-bello',
     invoice: 'INV-2026-140',
     amount: 9000,
+    currency: 'NGN',
     at: '2026-07-21',
     status: 'pending',
     reason: 'Unpaid for over 90 days. Proposed alongside the payment plan letter sent the same day.',
@@ -190,6 +198,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-babalola',
     invoice: 'INV-2026-162',
     amount: 600,
+    currency: 'NGN',
     direction: 'increase',
     at: '2026-07-22',
     status: 'pending',
@@ -203,6 +212,7 @@ const fixtures: Adjustment[] = [
     accountId: 'acc-adeyemi',
     invoice: 'INV-2026-163',
     amount: 390,
+    currency: 'NGN',
     direction: 'decrease',
     at: '2026-07-17',
     status: 'rejected',
