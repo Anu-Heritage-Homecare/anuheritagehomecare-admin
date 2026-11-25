@@ -1,4 +1,4 @@
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { Loader2, UserRoundX } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
 import { calculateCoverage, totalHours } from '../caregivers-data'
@@ -52,12 +52,12 @@ export function CaregiversTab() {
           {profile.name} has no assigned care team yet. Coverage and assignment
           history appear here once caregivers are attached.
         </p>
-        <button
-          type="button"
+        <Link
+          to={`/care-recipients/${profile.id}/caregivers/assign`}
           className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
         >
           Assign Caregiver
-        </button>
+        </Link>
       </div>
     )
   }
