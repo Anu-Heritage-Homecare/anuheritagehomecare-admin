@@ -19,10 +19,23 @@ export interface ProvisionCaregiverBody {
   state: string
   postalCode: string
   country: 'US' | 'NG'
+  dateOfBirth?: string
   gender?: 'MALE' | 'FEMALE'
   title?: string
   branch?: string
+  supervisorName?: string
   employmentType?: 'FULL_TIME' | 'PART_TIME' | 'CONTRACT'
+  experienceYears?: number
+  joinedAt?: string
+  maxHoursPerWeek?: number
+  preferredShift?: string
+  skills?: string[]
+  languages?: string[]
+  emergencyContactName?: string
+  emergencyContactPhone?: string
+  emergencyContactRelationship?: string
+  emergencyContactEmail?: string
+  preferencesNote?: string
 }
 
 export interface ProvisionedCaregiver {

@@ -1,16 +1,22 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronRight, TriangleAlert } from 'lucide-react'
+import { Check, ChevronRight, Copy, TriangleAlert } from 'lucide-react'
 import {
   TODAY,
-  createCaregiver,
   hasErrors,
   hoursOffered,
+  joinName,
   relationships,
   supervisorOptions,
   validate,
 } from '@/features/caregivers/edit-form'
 import type { Errors, FormValues } from '@/features/caregivers/edit-form'
+import { useProvisionCaregiver } from '@/features/caregivers/useProvisionCaregiver'
+import type {
+  ProvisionCaregiverBody,
+  ProvisionedCaregiver,
+} from '@/features/caregivers/useProvisionCaregiver'
+import { ApiError } from '@/lib/api'
 import {
   branches,
   employmentTypes,
@@ -71,8 +77,11 @@ export function AddCaregiverPage() {
   const [values, setValues] = useState<FormValues>(initialValues)
   const [emergencyEmail, setEmergencyEmail] = useState('')
   const [gender, setGender] = useState('')
+  const [country, setCountry] = useState<'US' | 'NG' | ''>('')
   const [submitted, setSubmitted] = useState(false)
   const nextCredentialId = useRef(0)
+  const provision = useProvisionCaregiver()
+  const [created, setCreated] = useState<ProvisionedCaregiver | null>(null)
 
   const errors = useMemo(() => validate(values), [values])
   // A certification on file needs its document; the agency does not record one
@@ -92,18 +101,36 @@ export function AddCaregiverPage() {
 
   const offered = hoursOffered(values.availability)
 
+  const saveError = provision.isError
+    ? provision.error instanceof ApiError
+      ? provision.error.message
+      : 'Could not create the caregiver. Please try again.'
+    : null
+
   function onSubmit(event: React.FormEvent) {
     event.preventDefault()
     setSubmitted(true)
-    if (invalid) {
+    if (invalid || country === '') {
       document.querySelector('[role="alert"]')?.scrollIntoView({
         behavior: 'smooth',
         block: 'center',
       })
       return
     }
-    const member = createCaregiver(values)
-    navigate(`/caregivers/${member.id}`)
+    provision.reset()
+    provision.mutate(toProvisionBody(values, gender, emergencyEmail, country), {
+      onSuccess: setCreated,
+    })
+  }
+
+  if (created) {
+    return (
+      <CreatedPanel
+        name={joinName(values.namePrefix, values.firstName.trim(), values.lastName.trim())}
+        result={created}
+        onDone={() => navigate(`/caregivers/${created.profileId}`)}
+      />
+    )
   }
 
   const errorList = Object.values(errors)
@@ -304,6 +331,20 @@ export function AddCaregiverPage() {
                 )}
               </Field>
             </div>
+            <Field label="Country" error={submitted && !country ? 'Select a country' : undefined}>
+              {(p) => (
+                <SelectBox
+                  {...p}
+                  className={fieldControl}
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value as 'US' | 'NG' | '')}
+                >
+                  <option value="">Select a country</option>
+                  <option value="US">United States</option>
+                  <option value="NG">Nigeria</option>
+                </SelectBox>
+              )}
+            </Field>
           </div>
         </div>
       </section>
@@ -536,6 +577,12 @@ export function AddCaregiverPage() {
         </div>
       </section>
 
+      {saveError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {saveError}
+        </div>
+      )}
+
       <div className="border-line flex flex-wrap items-center justify-end gap-3 border-t pt-5">
         {submitted && invalid && (
           <p className="text-ink-muted mr-auto inline-flex items-center gap-2 text-sm">
@@ -551,11 +598,110 @@ export function AddCaregiverPage() {
         </Link>
         <button
           type="submit"
-          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+          disabled={provision.isPending}
+          className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white disabled:opacity-60"
         >
-          Add Caregiver
+          {provision.isPending ? 'Adding…' : 'Add Caregiver'}
         </button>
       </div>
     </form>
+  )
+}
+
+/** Maps the create form into exactly what POST /admin/caregivers accepts. Empty
+ * optionals are omitted so the server keeps its own defaults. */
+function toProvisionBody(
+  v: FormValues,
+  gender: string,
+  emergencyEmail: string,
+  country: 'US' | 'NG',
+): ProvisionCaregiverBody {
+  const trimmed = (s: string) => s.trim()
+  const body: ProvisionCaregiverBody = {
+    firstName: trimmed(v.firstName),
+    lastName: trimmed(v.lastName),
+    email: trimmed(v.email),
+    phone: trimmed(v.phone),
+    addressLine1: trimmed(v.street),
+    city: trimmed(v.city),
+    state: trimmed(v.state),
+    postalCode: trimmed(v.zip),
+    country,
+  }
+  const set = (key: keyof ProvisionCaregiverBody, value: string | undefined) => {
+    if (value && value.trim()) (body as unknown as Record<string, string>)[key] = value.trim()
+  }
+  set('dateOfBirth', v.dateOfBirth)
+  set('title', v.title)
+  set('branch', v.branch)
+  set('supervisorName', v.supervisor)
+  set('joinedAt', v.hiredAt)
+  set('emergencyContactName', v.emergencyName)
+  set('emergencyContactPhone', v.emergencyPhone)
+  set('emergencyContactRelationship', v.emergencyRelationship)
+  set('emergencyContactEmail', emergencyEmail)
+  set('preferencesNote', v.notes)
+
+  if (gender === 'Male') body.gender = 'MALE'
+  else if (gender === 'Female') body.gender = 'FEMALE'
+
+  if (v.employment === 'Full-Time') body.employmentType = 'FULL_TIME'
+  else if (v.employment === 'Part-Time') body.employmentType = 'PART_TIME'
+  else if (v.employment === 'Bank') body.employmentType = 'CONTRACT'
+
+  const maxHours = Number(v.maxHoursPerWeek)
+  if (Number.isFinite(maxHours) && maxHours > 0) body.maxHoursPerWeek = maxHours
+  if (v.preferredShift && v.preferredShift !== 'No preference') {
+    body.preferredShift = v.preferredShift
+  }
+  if (v.skills.length > 0) body.skills = v.skills
+  if (v.languages.length > 0) body.languages = v.languages
+  return body
+}
+
+/** Success state: the server issues a one time temporary password that is shown
+ * exactly once, so the form is replaced by this panel rather than navigating. */
+function CreatedPanel({
+  name,
+  result,
+  onDone,
+}: {
+  name: string
+  result: ProvisionedCaregiver
+  onDone: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="card mx-auto max-w-lg p-6 text-center">
+      <span className="mx-auto grid size-11 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+        <Check className="size-5" strokeWidth={2.2} aria-hidden="true" />
+      </span>
+      <h1 className="text-ink mt-3 text-lg font-semibold">{name} has been added</h1>
+      <p className="text-ink-muted mt-1 text-sm">
+        Share this one time temporary password with the caregiver. They must change it on first
+        login, and it cannot be retrieved later.
+      </p>
+      <div className="border-line bg-sunken mt-4 flex items-center justify-between gap-3 rounded-lg border p-3">
+        <code className="text-ink font-mono text-sm">{result.temporaryPassword}</code>
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard.writeText(result.temporaryPassword)
+            setCopied(true)
+          }}
+          className="text-ink-muted hover:text-ink inline-flex items-center gap-1 text-xs"
+        >
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={onDone}
+        className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white"
+      >
+        View caregiver
+      </button>
+    </div>
   )
 }
