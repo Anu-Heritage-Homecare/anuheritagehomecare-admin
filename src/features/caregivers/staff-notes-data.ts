@@ -246,6 +246,51 @@ function fileNotes(member: StaffMember): StaffNote[] {
     }))
 }
 
+/* ------------------------- notes added this session ------------------------ */
+
+interface AddedStaffNote {
+  id: string
+  caregiverId: string
+  at: string
+  author: string
+  body: string
+  kind: StaffNoteKind
+}
+const addedStaffNotes: AddedStaffNote[] = []
+let addedStaffSeq = 0
+
+/** A note written on a caregiver's file from their Notes tab. Held in memory. */
+export function addStaffNote(
+  member: StaffMember,
+  note: { author: string; body: string; kind: StaffNoteKind },
+): void {
+  addedStaffSeq += 1
+  addedStaffNotes.push({
+    id: `staff-added-${addedStaffSeq}`,
+    caregiverId: member.id,
+    at: new Date().toISOString(),
+    author: note.author,
+    body: note.body,
+    kind: note.kind,
+  })
+}
+
+function addedNotesFor(member: StaffMember): StaffNote[] {
+  return addedStaffNotes
+    .filter((n) => n.caregiverId === member.id)
+    .map((n) => ({
+      id: n.id,
+      kind: n.kind,
+      at: n.at,
+      author: n.author,
+      authorRole: roleOf(n.author),
+      body: n.body,
+      authored: true,
+      own: n.author === member.name,
+      source: 'Added on this file',
+    }))
+}
+
 /** Everything on this caregiver's file, newest first. */
 export function notesFor(member: StaffMember): StaffNote[] {
   return [
@@ -253,6 +298,7 @@ export function notesFor(member: StaffMember): StaffNote[] {
     ...supervisionNotes(member),
     ...trainingNotes(member),
     ...fileNotes(member),
+    ...addedNotesFor(member),
   ].sort((a, b) => b.at.localeCompare(a.at) || a.id.localeCompare(b.id))
 }
 
