@@ -12,6 +12,7 @@ import {
   noteKindLabels,
   noteKindTones,
   noteKinds,
+  addStaffNote,
   notesFor,
   rangeOptions,
   rangeStart,
@@ -19,6 +20,9 @@ import {
 import type { NoteRange, StaffNote, StaffNoteKind } from './staff-notes-data'
 import type { StaffMember } from './roster-data'
 import { Avatar } from '@/components/ui/Avatar'
+import { Drawer } from '@/components/ui/Drawer'
+import { SelectBox } from '@/components/ui/SelectBox'
+import { SIGNED_IN } from '@/lib/session'
 import { SelectFilter } from '@/components/ui/SelectFilter'
 import { tonePill } from '@/lib/tone'
 import { fieldControl } from '@/lib/field-classes'
@@ -42,6 +46,8 @@ export function NotesTab({
 }) {
   const [params, setParams] = useSearchParams()
   const [shown, setShown] = useState(NOTES_PAGE_SIZE)
+  const [adding, setAdding] = useState(false)
+  const [rev, setRev] = useState(0)
 
   const rawKind = params.get('kind') ?? 'all'
   const rawRange = params.get('range') ?? 'all'
@@ -58,7 +64,8 @@ export function NotesTab({
     [rawKind, rawRange, search],
   )
 
-  const all = useMemo(() => notesFor(member), [member])
+  // `rev` bumps after a note is added, to recompute the list.
+  const all = useMemo(() => (void rev, notesFor(member)), [member, rev])
   const filtered = useMemo(() => applyQuery(all, query), [all, query])
   // Chip counts are of everything the *other* filters leave, so a chip is
   // never a non-zero number above a list it would empty.
@@ -207,9 +214,8 @@ export function NotesTab({
           )}
           <button
             type="button"
-            aria-disabled="true"
-            aria-describedby="add-note-note"
-            className="bg-brand-600 hover:bg-brand-700 ml-auto inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-brand-600"
+            onClick={() => setAdding(true)}
+            className="bg-brand-600 hover:bg-brand-700 ml-auto inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
           >
             <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
             Add note
@@ -224,10 +230,17 @@ export function NotesTab({
             ` · from ${formatNoteDay(`${rangeStart(query.range)}T12:00:00Z`)}`}
           .
         </p>
-        <p id="add-note-note" className="sr-only">
-          Sample data — adding a note is not wired up.
-        </p>
       </div>
+
+      <Drawer open={adding} onClose={() => setAdding(false)} title="Add note" placement="center">
+        <AddStaffNoteForm
+          member={member}
+          onDone={() => {
+            setAdding(false)
+            setRev((n) => n + 1)
+          }}
+        />
+      </Drawer>
 
       {/* ------------------------------- entries ----------------------------- */}
 
@@ -436,5 +449,52 @@ function NoteCard({
         )}
       </p>
     </li>
+  )
+}
+
+function AddStaffNoteForm({ member, onDone }: { member: StaffMember; onDone: () => void }) {
+  const kinds = noteKinds.filter((k) => k.value !== 'training')
+  const [kind, setKind] = useState<StaffNoteKind>('internal')
+  const [body, setBody] = useState('')
+  const valid = body.trim() !== ''
+  return (
+    <form
+      className="space-y-4 p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!valid) return
+        addStaffNote(member, { author: SIGNED_IN, body: body.trim(), kind })
+        onDone()
+      }}
+    >
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Note type</span>
+        <SelectBox value={kind} onChange={(e) => setKind(e.target.value as StaffNoteKind)} className={cn(fieldControl, 'mt-1.5')}>
+          {kinds.map((k) => (
+            <option key={k.value} value={k.value}>{k.label}</option>
+          ))}
+        </SelectBox>
+      </label>
+      <label className="block">
+        <span className="text-ink text-sm font-medium">Note</span>
+        <textarea
+          rows={4}
+          maxLength={500}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder={`A note on ${member.name}'s file`}
+          className={cn(fieldControl, 'mt-1.5 h-auto py-2')}
+        />
+      </label>
+      <p className="text-ink-subtle text-xs">Filed as {SIGNED_IN}.</p>
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onDone} className="border-control text-ink hover:bg-sunken inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium">
+          Cancel
+        </button>
+        <button type="submit" disabled={!valid} className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold text-white">
+          Add note
+        </button>
+      </div>
+    </form>
   )
 }

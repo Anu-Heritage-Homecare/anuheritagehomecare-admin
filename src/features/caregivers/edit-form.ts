@@ -1,6 +1,13 @@
 import { RATE_PER_HOUR } from '@/features/billing/data'
 import { assignmentsFor, coordinatingFor } from './roster-data'
-import { RENEWAL_WINDOW_DAYS, staffMembers, statusLabels, weekdays } from './staff'
+import {
+  RENEWAL_WINDOW_DAYS,
+  addStaffMember,
+  nextStaffId,
+  staffMembers,
+  statusLabels,
+  weekdays,
+} from './staff'
 import type {
   AvailabilityWindow,
   Credential,
@@ -99,6 +106,49 @@ export function splitAddress(address: string): {
 export function joinAddress(v: FormValues): string {
   const tail = [v.state, v.zip].filter(Boolean).join(' ')
   return [v.street, v.city, tail].filter(Boolean).join(', ')
+}
+
+/**
+ * Builds a staff record from the form and adds it to the roster. No design
+ * existed for creating a caregiver, so this follows the same shape the edit
+ * form reads back: name and address are joined the way the record stores them,
+ * and the fields the form does not collect take safe defaults the profile can
+ * be edited to change.
+ */
+export function createCaregiver(values: FormValues): StaffMember {
+  const id = nextStaffId()
+  const email = values.email.trim()
+  const member: StaffMember = {
+    id,
+    ref: `#${id.toUpperCase()}`,
+    name: joinName(values.namePrefix, values.firstName.trim(), values.lastName.trim()),
+    title: values.title,
+    status: values.status,
+    employment: values.employment,
+    branch: values.branch,
+    hiredAt: values.hiredAt,
+    dateOfBirth: values.dateOfBirth,
+    priorExperienceYears: 0,
+    phone: values.phone.trim(),
+    ...(email ? { email } : {}),
+    hourlyRate: Number(values.hourlyRate),
+    maxHoursPerWeek: Number(values.maxHoursPerWeek),
+    preferredShift: values.preferredShift,
+    supervisor: values.supervisor,
+    notes: values.notes.trim(),
+    address: joinAddress(values),
+    emergencyContact: {
+      name: values.emergencyName.trim(),
+      relationship: values.emergencyRelationship.trim(),
+      phone: values.emergencyPhone.trim(),
+    },
+    languages: values.languages,
+    skills: values.skills,
+    credentials: values.credentials,
+    availability: values.availability,
+  }
+  addStaffMember(member)
+  return member
 }
 
 /* -------------------------------- conversion ------------------------------- */
@@ -495,6 +545,20 @@ export function deleteBlockers(member: StaffMember): string[] {
 
   return blockers
 }
+
+export const relationships = [
+  'Husband',
+  'Wife',
+  'Partner',
+  'Mother',
+  'Father',
+  'Sister',
+  'Brother',
+  'Son',
+  'Daughter',
+  'Friend',
+  'Other',
+]
 
 export const supervisorOptions = staffMembers
   .filter((s) => s.title === 'Care Coordinator')

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { quickActions } from './data'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { toneChip } from '@/lib/tone'
@@ -9,10 +10,10 @@ export function QuickActions() {
       <SectionHeading id="quick-actions" title="Quick Actions" />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-2">
-        {quickActions.map(({ id, label, icon: Icon, tone }) => (
-          <button
+        {quickActions.map(({ id, label, icon: Icon, tone, to }) => (
+          <Link
             key={id}
-            type="button"
+            to={to}
             className="card hover:border-brand-300 hover:bg-brand-50/40 group flex flex-col gap-3 p-4 text-left transition-colors"
           >
             {/*
@@ -32,7 +33,7 @@ export function QuickActions() {
             <span className="text-ink text-sm leading-snug font-semibold">
               {label}
             </span>
-          </button>
+          </Link>
         ))}
       </div>
     </section>

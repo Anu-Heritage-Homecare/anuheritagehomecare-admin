@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import type { Tone } from '@/types'
 
 /*
@@ -57,6 +58,8 @@ export interface Credential {
   expiresAt?: string
   /** ISO, for checks that record when they were cleared. */
   clearedAt?: string
+  /** Name of the uploaded supporting document, where one was attached. */
+  document?: string
 }
 
 export interface StaffMember {
@@ -458,6 +461,46 @@ const staff: StaffMember[] = [
 ]
 
 export const staffMembers: StaffMember[] = staff
+
+/* --------------------------------- mutations ------------------------------- */
+
+/*
+ * Caregivers added this session. They are pushed onto the very array every
+ * screen reads, so the roster, the board and the care teams all see them at
+ * once; the revision below re-renders anything subscribed. Held in memory,
+ * like every store in this prototype.
+ */
+let staffRevision = 0
+const staffListeners = new Set<() => void>()
+
+/** Re-render a screen after a caregiver is added. */
+export function useStaffRevision(): number {
+  return useSyncExternalStore(
+    (l) => {
+      staffListeners.add(l)
+      return () => staffListeners.delete(l)
+    },
+    () => staffRevision,
+    () => staffRevision,
+  )
+}
+
+/** Append a caregiver and notify subscribers. */
+export function addStaffMember(member: StaffMember): void {
+  staff.push(member)
+  staffRevision += 1
+  for (const l of staffListeners) l()
+}
+
+/** The next free `cg-0NN` id, from the ids already in use. */
+export function nextStaffId(): string {
+  let max = 0
+  for (const m of staff) {
+    const n = Number(/^cg-(\d+)$/.exec(m.id)?.[1])
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return `cg-${String(max + 1).padStart(3, '0')}`
+}
 
 
 export function getStaffMember(id: string | undefined): StaffMember | undefined {

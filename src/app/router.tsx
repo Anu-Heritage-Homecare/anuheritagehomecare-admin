@@ -180,6 +180,13 @@ export const router = createBrowserRouter([
            * rather than living inside it — the same shape as discharge.
            */
           {
+            path: 'caregivers/new',
+            lazy: lazyRoute(
+              () => import('@/pages/AddCaregiverPage'),
+              'AddCaregiverPage',
+            ),
+          },
+          {
             path: 'caregivers/:caregiverId/edit',
             lazy: lazyRoute(
               () => import('@/pages/CaregiverEditPage'),
