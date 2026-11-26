@@ -41,23 +41,27 @@ export function CaregiversTab() {
 
   if (record.team.length === 0) {
     return (
-      <div className="card grid place-items-center px-6 py-20 text-center">
-        <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">
-          <UserRoundX className="size-5" strokeWidth={1.8} aria-hidden="true" />
-        </span>
-        <h2 className="text-ink mt-3 text-sm font-semibold">
-          No caregivers assigned
-        </h2>
-        <p className="text-ink-muted mt-1 max-w-sm text-sm">
-          {profile.name} has no assigned care team yet. Coverage and assignment
-          history appear here once caregivers are attached.
-        </p>
-        <Link
-          to={`/care-recipients/${profile.id}/caregivers/assign`}
-          className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
-        >
-          Assign Caregiver
-        </Link>
+      <div className="space-y-6">
+        <div className="card grid place-items-center px-6 py-20 text-center">
+          <span className="bg-sunken text-ink-subtle grid size-11 place-items-center rounded-full">
+            <UserRoundX className="size-5" strokeWidth={1.8} aria-hidden="true" />
+          </span>
+          <h2 className="text-ink mt-3 text-sm font-semibold">
+            No caregivers assigned
+          </h2>
+          <p className="text-ink-muted mt-1 max-w-sm text-sm">
+            {profile.name} has no assigned care team yet. Coverage appears here once
+            caregivers are attached.
+          </p>
+          <Link
+            to={`/care-recipients/${profile.id}/caregivers/assign`}
+            className="bg-brand-600 hover:bg-brand-700 mt-5 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium text-white transition-colors"
+          >
+            Assign Caregiver
+          </Link>
+        </div>
+        {/* A team can empty out while its past assignments remain; keep the record visible. */}
+        {record.history.length > 0 && <AssignmentHistory history={record.history} />}
       </div>
     )
   }

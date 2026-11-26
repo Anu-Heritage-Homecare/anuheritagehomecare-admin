@@ -81,7 +81,7 @@ export function CareRequestsPage() {
    * it. A single generous page covers the intake volume; the server also
    * paginates if that assumption ever breaks.
    */
-  const { data, isPending, isError, error, refetch } = useCareRequests(null, 1, 200)
+  const { data, isPending, isError, error, refetch } = useCareRequests(null, 1, 100)
   const liveRequests = useMemo(() => data?.requests ?? [], [data])
 
   // Filters, the open request and the page all live in the URL, so a queue
