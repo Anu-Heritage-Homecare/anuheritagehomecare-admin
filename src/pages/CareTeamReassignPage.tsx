@@ -203,7 +203,7 @@ function ReassignView({
         role: roleToken,
         scheduleLabel: member?.schedule,
         specialization: member?.specialization,
-        reason,
+        reason: reason.trim() ? reason : undefined,
       },
       {
         onSuccess: () => {
@@ -529,7 +529,7 @@ function ConfirmBar({
             onChange={(e) => setReason(e.target.value)}
             className="border-control h-11 w-64 rounded-lg border px-3 text-sm"
           >
-            <option value="">Reason for the change</option>
+            <option value="">{member ? 'Reason for the change' : 'Reason (optional)'}</option>
             {reasons.map((r) => <option key={r}>{r}</option>)}
           </SelectBox>
           <button type="button" onClick={onClear} className="border-control text-ink hover:bg-sunken inline-flex h-11 items-center rounded-lg border px-4 text-sm font-medium">
@@ -537,7 +537,7 @@ function ConfirmBar({
           </button>
           <button
             type="button"
-            disabled={!reason || pending}
+            disabled={(Boolean(member) && !reason) || pending}
             onClick={() => onConfirm(reason)}
             className="bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 inline-flex h-11 items-center gap-2 rounded-lg px-5 text-sm font-semibold text-white"
           >
