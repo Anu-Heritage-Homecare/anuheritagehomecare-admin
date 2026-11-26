@@ -23,10 +23,7 @@ interface ListItemDto {
   age: number
   primaryCondition: string | null
   careLevel: string | null
-  // The full team is the current shape; the single name is tolerated so an older
-  // backend that has not shipped yet still renders instead of crashing.
-  assignedCaregiverNames?: string[]
-  assignedCaregiverName?: string | null
+  assignedCaregiverNames: string[]
   status: string
   priority: string
   lastVisitAt: string | null
@@ -187,18 +184,6 @@ function toTabCounts(dto: ListResponseDto): Record<DirectoryFilter, number> {
   }
 }
 
-/**
- * Every active caregiver joined into one label, so a recipient with several shows
- * them all. Falls back to the single name an older backend sends, and to no
- * caregiver when neither field is present, so the list never throws on the shape.
- */
-function assignedCaregivers(item: ListItemDto): string | null {
-  const names =
-    item.assignedCaregiverNames ??
-    (item.assignedCaregiverName != null ? [item.assignedCaregiverName] : [])
-  return names.length === 0 ? null : names.join(', ')
-}
-
 function toRows(dto: ListResponseDto): Recipient[] {
   return dto.items.map((item) => ({
     id: item.id,
@@ -207,7 +192,9 @@ function toRows(dto: ListResponseDto): Recipient[] {
     age: item.age,
     condition: item.primaryCondition ?? '—',
     careLevel: toCareLevel(item.careLevel),
-    caregiver: assignedCaregivers(item),
+    // Every active care team member, so a recipient with several caregivers shows
+    // them all rather than only the primary.
+    caregiver: item.assignedCaregiverNames.length === 0 ? null : item.assignedCaregiverNames.join(', '),
     status: toStatus(item.status),
     priority: toPriority(item.priority),
     lastVisit: formatLastVisit(item.lastVisitAt),
