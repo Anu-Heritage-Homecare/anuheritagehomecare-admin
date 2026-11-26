@@ -21,7 +21,8 @@ export interface AssignCaregiverBody {
   role: CareTeamRoleToken
   specialization?: string
   scheduleLabel?: string
-  reason: string
+  // Optional for a first assignment; the reassign flow still supplies it.
+  reason?: string
 }
 
 export interface ReviseAssignmentBody {

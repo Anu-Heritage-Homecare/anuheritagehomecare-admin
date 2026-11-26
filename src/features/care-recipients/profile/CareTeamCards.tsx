@@ -1,9 +1,11 @@
-import { MessageSquare, Star } from 'lucide-react'
+import { useState } from 'react'
+import { MessageSquare, Star, UserRoundMinus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { staffByName } from '@/features/caregivers/staff'
 import type { CaregiverRole, CaregiverStatus, TeamMember } from '../caregivers-data'
 import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
+import { RemoveFromTeamDialog } from './RemoveFromTeamDialog'
 
 const roleColour: Record<CaregiverRole, string> = {
   'Primary Caregiver': 'text-brand-700',
@@ -40,6 +42,7 @@ function MemberCard({ member, recipientId }: { member: TeamMember; recipientId: 
   const staff = staffByName(member.name)
   // Messages can start a conversation with active staff only.
   const canMessage = staff?.status === 'active'
+  const [removing, setRemoving] = useState(false)
   return (
     <li
       className={cn(
@@ -183,7 +186,25 @@ function MemberCard({ member, recipientId }: { member: TeamMember; recipientId: 
           View Profile
           <span className="sr-only"> for {member.name}</span>
         </Link>
+        <button
+          type="button"
+          onClick={() => setRemoving(true)}
+          className="flex h-10 items-center justify-center rounded-lg text-sm font-medium text-red-700 transition-colors hover:bg-red-50"
+        >
+          <UserRoundMinus className="mr-1.5 size-4" strokeWidth={1.9} aria-hidden="true" />
+          Remove from team
+          <span className="sr-only"> {member.name}</span>
+        </button>
       </div>
+      <RemoveFromTeamDialog
+        recipientId={recipientId}
+        assignmentId={member.id}
+        caregiverId={member.caregiverId}
+        caregiverName={member.name}
+        upcomingVisits={member.upcomingVisits}
+        open={removing}
+        onClose={() => setRemoving(false)}
+      />
     </li>
   )
 }
