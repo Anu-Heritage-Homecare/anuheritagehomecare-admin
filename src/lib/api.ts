@@ -28,13 +28,24 @@ export class ApiError extends Error {
 /** Fired when the session cannot be refreshed; the auth provider signs out. */
 export const AUTH_LOGOUT_EVENT = 'admin:auth-logout'
 
+/** Pull a readable string out of a backend `message`, which may be a string, an
+ * array of validation strings, or a nested `{ message }` object (the shape the
+ * API wraps validation errors in). Anything else falls back to the status text. */
+function readMessage(raw: unknown, fallback: string): string {
+  if (Array.isArray(raw)) return raw.join(', ')
+  if (typeof raw === 'string') return raw
+  if (raw && typeof raw === 'object' && 'message' in raw) {
+    return readMessage((raw as { message?: unknown }).message, fallback)
+  }
+  return fallback
+}
+
 async function toApiError(res: Response): Promise<ApiError> {
   let message = res.statusText
   let code: string | undefined
   try {
-    const body = (await res.json()) as { message?: string | string[]; code?: string }
-    if (Array.isArray(body.message)) message = body.message.join(', ')
-    else if (body.message) message = body.message
+    const body = (await res.json()) as { message?: unknown; code?: string }
+    message = readMessage(body.message, res.statusText)
     code = body.code
   } catch {
     // Non JSON error body; the status text is the best we have.

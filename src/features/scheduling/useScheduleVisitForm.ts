@@ -47,7 +47,7 @@ export function useRecipientOptions() {
   return useQuery({
     queryKey: ['admin', 'scheduling', 'recipient-options'],
     queryFn: async (): Promise<RecipientOption[]> => {
-      const dto = await api.get<RecipientListDto>('/admin/care-recipients?pageSize=200')
+      const dto = await api.get<RecipientListDto>('/admin/care-recipients?pageSize=100')
       return dto.items.map((r) => ({
         id: r.id,
         code: r.code,

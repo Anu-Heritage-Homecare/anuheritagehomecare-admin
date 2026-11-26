@@ -147,13 +147,12 @@ function ReassignView({
   // to those visits: move them to the incoming caregiver, release them, or leave.
   const [visitAction, setVisitAction] = useState<'move' | 'unassign' | 'leave'>('move')
 
-  // Caregivers already holding a seat on this team are not offered again.
-  const onTeam = useMemo(
-    () => new Set(team.map((m) => m.name).filter((n) => n !== '—')),
-    [team],
-  )
+  // Caregivers already holding a seat on this team are not offered again. Matched
+  // by caregiver id, not name, so the current caregiver can never be reassigned
+  // to themselves and a shared name never hides or shows the wrong person.
+  const onTeam = useMemo(() => new Set(team.map((m) => m.caregiverId)), [team])
   const all = useMemo(
-    () => (candidatesQuery.data ?? []).filter((c) => !onTeam.has(c.name)),
+    () => (candidatesQuery.data ?? []).filter((c) => !onTeam.has(c.id)),
     [candidatesQuery.data, onTeam],
   )
   const branches = useMemo(
