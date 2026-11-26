@@ -253,6 +253,19 @@ function ReassignView({
         </p>
       </div>
 
+      {assigning && !profile.hasCareSchedule && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" strokeWidth={2.2} aria-hidden="true" />
+          <p>
+            {profile.name} has no active care plan on file yet. You can still assign a caregiver, but
+            there is no recurring schedule to generate visits from until a care plan is set.
+          </p>
+        </div>
+      )}
+
       <section aria-labelledby="seat-strip" className="card p-4 sm:px-7 sm:py-5">
         <div className="flex flex-wrap items-center gap-3">
           <h2 id="seat-strip" className="text-ink text-lg font-bold tracking-tight break-words">
