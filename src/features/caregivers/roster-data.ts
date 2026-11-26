@@ -379,11 +379,15 @@ const longDate = new Intl.DateTimeFormat('en-US', {
 })
 
 export function formatDate(iso: string): string {
-  return longDate.format(new Date(`${iso}T00:00:00Z`))
+  if (!iso) return '—'
+  const date = new Date(`${iso}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? '—' : longDate.format(date)
 }
 
 export function formatMonth(iso: string): string {
-  return monthFormat.format(new Date(`${iso}T00:00:00Z`))
+  if (!iso) return '—'
+  const date = new Date(`${iso}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? '—' : monthFormat.format(date)
 }
 
 /** "07:00" → "7:00 AM", so stored windows and visit times read alike. */

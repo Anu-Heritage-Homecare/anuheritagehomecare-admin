@@ -23,7 +23,7 @@ interface ListItemDto {
   age: number
   primaryCondition: string | null
   careLevel: string | null
-  assignedCaregiverName: string | null
+  assignedCaregiverNames: string[]
   status: string
   priority: string
   lastVisitAt: string | null
@@ -192,7 +192,9 @@ function toRows(dto: ListResponseDto): Recipient[] {
     age: item.age,
     condition: item.primaryCondition ?? '—',
     careLevel: toCareLevel(item.careLevel),
-    caregiver: item.assignedCaregiverName,
+    // Every active care team member, so a recipient with several caregivers shows
+    // them all rather than only the primary.
+    caregiver: item.assignedCaregiverNames.length === 0 ? null : item.assignedCaregiverNames.join(', '),
     status: toStatus(item.status),
     priority: toPriority(item.priority),
     lastVisit: formatLastVisit(item.lastVisitAt),

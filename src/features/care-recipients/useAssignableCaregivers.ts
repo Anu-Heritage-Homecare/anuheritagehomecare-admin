@@ -1,7 +1,8 @@
 /**
  * The assignable caregivers source for the Care Team Reassign screen, read from
- * the backend directory (`GET /admin/caregivers`). Each row carries the backend
- * caregiver id the assign and reassign writes need.
+ * the backend directory (`GET /admin/caregivers`). `id` is the caregiver profile
+ * id (for the detail link); `userId` is the identity id the assign and reassign
+ * writes key on, and the one the team membership is compared by.
  *
  * The directory takes only status and paging (no search), so the page filters
  * client side; this fetches one large page of active caregivers.
@@ -11,6 +12,7 @@ import { api } from '@/lib/api'
 
 interface CaregiverRowDto {
   id: string
+  userId: string
   reference: string
   name: string
   title: string | null
@@ -28,6 +30,7 @@ interface CaregiverListDto {
 
 export interface AssignableCaregiver {
   id: string
+  userId: string
   reference: string
   name: string
   title: string | null

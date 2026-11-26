@@ -84,7 +84,9 @@ function toRole(value: string): CaregiverRole {
 }
 
 function toStatus(value: string): CaregiverStatus {
-  switch (value) {
+  // The backend sends title case ('Active' for a primary, 'Available' for a
+  // backup); normalise so a real member is not mislabelled as off duty.
+  switch (value.toUpperCase()) {
     case 'ACTIVE':
       return 'active'
     case 'AVAILABLE':

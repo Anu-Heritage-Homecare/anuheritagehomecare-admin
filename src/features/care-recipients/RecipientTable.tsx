@@ -14,7 +14,7 @@ const columns = [
   'Age',
   'Primary Condition',
   'Care Level',
-  'Assigned Caregiver',
+  'Assigned Caregivers',
   'Status',
   'Priority',
   'Last Visit',
@@ -178,7 +178,7 @@ export function RecipientTable({ rows, searching }: RecipientTableProps) {
                 <dd>{r.age}</dd>
               </div>
               <div className="flex gap-1.5">
-                <dt className="text-ink-subtle shrink-0">Caregiver:</dt>
+                <dt className="text-ink-subtle shrink-0">Caregivers:</dt>
                 <dd className="min-w-0 break-words">
                   {r.caregiver ?? 'Unassigned'}
                 </dd>

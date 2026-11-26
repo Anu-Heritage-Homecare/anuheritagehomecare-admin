@@ -74,6 +74,36 @@ interface OverviewAvailabilityDayDto {
   slots: { startMinute: number; endMinute: number; label: string }[]
 }
 
+interface OverviewAssignmentDto {
+  recipientName: string
+  role: string
+  since: string
+}
+
+interface OverviewTodayVisitDto {
+  time: string
+  recipientName: string
+  visitType: string
+  status: string
+}
+
+interface OverviewPerformanceDto {
+  ratingAverage: number | null
+  ratingCount: number
+  satisfactionPercent: number | null
+  taskCompletionPercent: number | null
+  punctualityPercent: number | null
+  visitsThisMonth: number
+  hoursLogged: number
+  missedVisits: number
+}
+
+interface OverviewNoteDto {
+  body: string
+  authorName: string | null
+  createdAt: string
+}
+
 interface CaregiverOverviewDto {
   id: string
   reference: string
@@ -91,10 +121,32 @@ interface CaregiverOverviewDto {
   hourlyRateMinor: number | null
   payCurrency: string | null
   personal: OverviewPersonalDto
+  assignments: OverviewAssignmentDto[]
+  todaySchedule: OverviewTodayVisitDto[]
+  performance: OverviewPerformanceDto
   certifications: OverviewCertificationDto[]
+  fullyCompliant: boolean
   skills: string[]
   availability: OverviewAvailabilityDayDto[]
+  recentNotes: OverviewNoteDto[]
 }
+
+/**
+ * The parts of the Overview endpoint that the roster fixtures used to derive:
+ * the caseload, today's visits, the headline performance, the recent notes and
+ * whether the whole credential set is in date. Carried on the profile object so
+ * `OverviewTab` reads backend data in place of the fixture helpers.
+ */
+export interface CaregiverOverviewExtras {
+  assignments: OverviewAssignmentDto[]
+  todaySchedule: OverviewTodayVisitDto[]
+  performance: OverviewPerformanceDto
+  recentNotes: OverviewNoteDto[]
+  fullyCompliant: boolean
+}
+
+/** A caregiver profile plus the Overview tab's own backend data. */
+export type CaregiverProfile = StaffMember & { overview: CaregiverOverviewExtras }
 
 /* -------------------------------- mappers --------------------------------- */
 
@@ -152,8 +204,11 @@ function toCredential(dto: OverviewCertificationDto): Credential {
     // treats anything with an expiry as a certification, so that is the default.
     kind: 'certification',
     reference: dto.licenseNumber ?? undefined,
-    issuedAt: dto.issuedAt ?? undefined,
-    expiresAt: dto.expiresAt,
+    // The backend sends full ISO timestamps; the card formatters expect a date
+    // only string (they append a time), so take the date part as the rest of the
+    // profile dates do.
+    issuedAt: dto.issuedAt ? dto.issuedAt.slice(0, 10) : undefined,
+    expiresAt: dto.expiresAt.slice(0, 10),
   }
 }
 
@@ -173,10 +228,17 @@ function toAvailability(days: OverviewAvailabilityDayDto[]): AvailabilityWindow[
   return windows.sort((a, b) => weekdays.indexOf(a.day) - weekdays.indexOf(b.day))
 }
 
-/** One caregiver's Overview, mapped to the `StaffMember` the screen renders. */
-function toStaffMember(dto: CaregiverOverviewDto): StaffMember {
+/** One caregiver's Overview, mapped to the profile the screen renders. */
+function toStaffMember(dto: CaregiverOverviewDto): CaregiverProfile {
   const p = dto.personal
   return {
+    overview: {
+      assignments: dto.assignments,
+      todaySchedule: dto.todaySchedule,
+      performance: dto.performance,
+      recentNotes: dto.recentNotes,
+      fullyCompliant: dto.fullyCompliant,
+    },
     id: dto.id,
     ref: dto.reference,
     name: dto.name,
@@ -262,12 +324,12 @@ export function useCaregiverRoster() {
   })
 }
 
-/** One caregiver's profile, mapped to the `StaffMember` the profile screen renders. */
+/** One caregiver's profile, mapped to the shape the profile screen renders. */
 export function useCaregiverProfile(id: string | undefined) {
   return useQuery({
     queryKey: ['admin', 'caregivers', 'profile', id],
     enabled: Boolean(id),
-    queryFn: async (): Promise<StaffMember> =>
+    queryFn: async (): Promise<CaregiverProfile> =>
       toStaffMember(await api.get<CaregiverOverviewDto>(`/admin/caregivers/${id}/overview`)),
   })
 }
