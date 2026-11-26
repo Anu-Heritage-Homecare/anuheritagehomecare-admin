@@ -25,6 +25,7 @@ import type {
 import {
   useCaregiverProfile,
   useCaregiverRoster,
+  type CaregiverProfile,
 } from '@/features/caregivers/useCaregivers'
 import { OverviewTab } from '@/features/caregivers/StaffTabs'
 import { NotesTab } from '@/features/caregivers/NotesTab'
@@ -396,7 +397,7 @@ function StaffProfile({
   suffix,
   tabSuffix,
 }: {
-  member: StaffMember
+  member: CaregiverProfile
   tab: TabSlug
   /** The roster's filters, carried through every link out of here. */
   suffix: string
@@ -552,7 +553,7 @@ function StaffProfile({
       {tab === 'schedule' && <ScheduleTab member={member} suffix={suffix} />}
       {tab === 'performance' && <PerformanceTab member={member} />}
       {tab === 'documents' && <DocumentsTab member={member} />}
-      {tab === 'notes' && <NotesTab member={member} suffix={suffix} />}
+      {tab === 'notes' && <NotesTab member={member} />}
     </div>
   )
 }
@@ -574,7 +575,8 @@ function StaffRow({ member, to }: { member: StaffMember; to: string }) {
               {member.name}
             </Link>
             <span className="text-ink-subtle block text-xs">
-              {member.ref} · age {age(member)}
+              {member.ref}
+              {member.dateOfBirth ? ` · age ${age(member)}` : ''}
             </span>
           </span>
         </span>

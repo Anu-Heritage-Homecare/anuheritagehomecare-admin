@@ -3,7 +3,6 @@ import { ArrowRight, Check, Shield, Star, TriangleAlert } from 'lucide-react'
 import type { StaffMember } from './roster-data'
 import {
   age,
-  assignmentsFor,
   availabilityFor,
   complianceFor,
   complianceLabels,
@@ -12,17 +11,42 @@ import {
   emailFor,
   formatDate,
   formatTime,
-  performanceFor,
-  todaysVisits,
-  visitsFor,
   weekdays,
 } from './roster-data'
-import { formatNoteDay, notesFor } from './staff-notes-data'
+import type { CaregiverProfile } from './useCaregivers'
 import type { VisitStatus } from '@/types'
-import { TODAY } from '@/lib/today'
 import { VisitStatusBadge } from '@/components/ui/StatusBadge'
 import { tonePill } from '@/lib/tone'
 import { cn } from '@/lib/cn'
+
+/* The Overview visit cards carry the raw visit status enum from the backend. */
+function toVisitStatus(value: string): VisitStatus {
+  switch (value) {
+    case 'COMPLETED':
+      return 'completed'
+    case 'IN_PROGRESS':
+    case 'ON_BREAK':
+      return 'in-progress'
+    case 'CANCELLED':
+      return 'cancelled'
+    case 'MISSED':
+      return 'late-arrival'
+    default:
+      return 'upcoming'
+  }
+}
+
+/** A day in short, from an ISO timestamp, for the recent notes line. */
+const noteDay = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+function formatNoteDay(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '' : noteDay.format(date)
+}
 
 /* -------------------------------- overview -------------------------------- */
 
@@ -30,12 +54,12 @@ export function OverviewTab({
   member,
   suffix = '',
 }: {
-  member: StaffMember
+  member: CaregiverProfile
   suffix?: string
 }) {
-  const assignments = assignmentsFor(member)
-  const today = todaysVisits(member)
-  const notes = notesFor(member).slice(0, 3)
+  const assignments = member.overview.assignments
+  const today = member.overview.todaySchedule
+  const notes = member.overview.recentNotes.slice(0, 3)
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -57,12 +81,15 @@ export function OverviewTab({
               {
                 id: 'dob',
                 label: 'Date of Birth',
-                // Age is computed from the date beside it, against today.
-                value: (
+                // Age is computed from the date beside it, against today; shown
+                // only when a date of birth is on file.
+                value: member.dateOfBirth ? (
                   <>
                     {formatDate(member.dateOfBirth)}{' '}
                     <span className="text-ink-subtle">(Age {age(member)})</span>
                   </>
+                ) : (
+                  'Not recorded'
                 ),
               },
               {
@@ -104,7 +131,7 @@ export function OverviewTab({
               <table className="w-full min-w-lg text-left text-sm">
                 <thead className="border-line bg-sunken text-ink-muted border-b text-xs">
                   <tr>
-                    {['Care Recipient', 'Care Level', 'Schedule', 'Since'].map((col) => (
+                    {['Care Recipient', 'Role', 'Since'].map((col) => (
                       <th key={col} scope="col" className="px-4 py-2.5 font-medium">
                         {col}
                       </th>
@@ -112,19 +139,15 @@ export function OverviewTab({
                   </tr>
                 </thead>
                 <tbody className="divide-line/70 divide-y">
-                  {assignments.map((a) => (
-                    <tr key={a.recipientId}>
-                      <th scope="row" className="px-4 py-3 font-normal whitespace-nowrap">
-                        <Link
-                          to={`/care-recipients/${a.recipientId}`}
-                          className="text-ink hover:text-brand-700 font-medium"
-                        >
-                          {a.recipientName}
-                        </Link>
+                  {assignments.map((a, i) => (
+                    <tr key={`${a.recipientName}-${i}`}>
+                      <th scope="row" className="text-ink px-4 py-3 font-medium whitespace-nowrap">
+                        {a.recipientName}
                       </th>
-                      <td className="text-ink-muted px-4 py-3 whitespace-nowrap">{a.careLevel}</td>
-                      <td className="text-ink-muted px-4 py-3">{a.schedule}</td>
-                      <td className="text-ink-muted px-4 py-3 whitespace-nowrap">{a.since}</td>
+                      <td className="text-ink-muted px-4 py-3 whitespace-nowrap">{a.role}</td>
+                      <td className="text-ink-muted px-4 py-3 whitespace-nowrap">
+                        {a.since ? formatDate(a.since.slice(0, 10)) : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -149,11 +172,12 @@ export function OverviewTab({
             <p className="text-ink-muted mt-4 text-sm">Nothing logged for today.</p>
           ) : (
             <ol className="mt-4 space-y-3">
-              {today.map((visit) => {
-                const done = visit.status === 'completed'
-                const live = visit.status === 'in-progress'
+              {today.map((visit, i) => {
+                const status = toVisitStatus(visit.status)
+                const done = status === 'completed'
+                const live = status === 'in-progress'
                 return (
-                  <li key={visit.id} className="flex items-center gap-4">
+                  <li key={`${visit.time}-${i}`} className="flex items-center gap-4">
                     <p
                       className={cn(
                         'w-20 shrink-0 text-sm tabular-nums',
@@ -187,10 +211,10 @@ export function OverviewTab({
                             live ? 'text-brand-700' : 'text-ink-muted',
                           )}
                         >
-                          {visit.type}
+                          {visit.visitType}
                         </p>
                       </div>
-                      <ScheduleTag status={visit.status} />
+                      <ScheduleTag status={status} />
                     </div>
                   </li>
                 )
@@ -207,16 +231,14 @@ export function OverviewTab({
             <p className="text-ink-muted mt-4 text-sm">No notes yet.</p>
           ) : (
             <ul className="divide-line/70 mt-3 divide-y">
-              {notes.map((note) => (
-                <li key={note.id} className="py-3 first:pt-0">
-                  <p className="text-ink text-sm break-words">
-                    {note.authored ? `“${note.body}”` : note.body}
-                  </p>
+              {notes.map((note, i) => (
+                <li key={`${note.createdAt}-${i}`} className="py-3 first:pt-0">
+                  <p className="text-ink text-sm break-words">“{note.body}”</p>
                   <p className="text-ink-muted mt-0.5 text-xs">
-                    {note.authored
-                      ? `Written by ${note.author === member.name ? 'Self' : note.author}`
+                    {note.authorName
+                      ? `Written by ${note.authorName === member.name ? 'Self' : note.authorName}`
                       : 'From the record'}{' '}
-                    • {formatNoteDay(note.at)}
+                    • {formatNoteDay(note.createdAt)}
                   </p>
                 </li>
               ))}
@@ -313,16 +335,11 @@ export function PerformanceCard({
   compact,
   suffix = '',
 }: {
-  member: StaffMember
+  member: CaregiverProfile
   compact?: boolean
   suffix?: string
 }) {
-  const p = performanceFor(member)
-  // The last 30 days of the visit log, counted rather than stated.
-  const since = new Date(`${TODAY}T00:00:00Z`)
-  since.setUTCDate(since.getUTCDate() - 30)
-  const cutoff = since.toISOString().slice(0, 10)
-  const monthVisits = visitsFor(member).filter((v) => v.date >= cutoff && v.date <= TODAY).length
+  const p = member.overview.performance
 
   return (
     <section aria-labelledby="perf-summary" className="card p-5">
@@ -343,28 +360,25 @@ export function PerformanceCard({
 
       <div className="bg-sunken mt-4 flex items-center gap-4 rounded-xl px-4 py-3.5">
         <p className="text-ink text-4xl font-bold tracking-tight tabular-nums">
-          {p.rating ?? '—'}
+          {p.ratingAverage ?? '—'}
         </p>
         <div className="min-w-0">
-          {p.rating !== null && <Stars rating={p.rating} />}
-          <p className="text-ink-muted mt-0.5 text-xs">{ratingWord(p.rating)}</p>
+          {p.ratingAverage !== null && <Stars rating={p.ratingAverage} />}
+          <p className="text-ink-muted mt-0.5 text-xs">{ratingWord(p.ratingAverage)}</p>
         </div>
       </div>
 
       <div className="mt-4 space-y-3">
-        <Meter label="Punctuality" value={p.punctuality} />
-        <Meter
-          label="Client Satisfaction"
-          value={p.rating === null ? null : Math.round((p.rating / 5) * 100)}
-        />
-        <Meter label="Task Completion" value={p.completionRate} />
+        <Meter label="Punctuality" value={p.punctualityPercent} />
+        <Meter label="Client Satisfaction" value={p.satisfactionPercent} />
+        <Meter label="Task Completion" value={p.taskCompletionPercent} />
       </div>
 
       <dl className="mt-4 grid grid-cols-3 gap-3">
         {[
-          ['Visits (Month)', String(monthVisits)],
-          ['Hours Logged', `${p.hours}h`],
-          ['Missed Visits', String(p.missed)],
+          ['Visits (Month)', String(p.visitsThisMonth)],
+          ['Hours Logged', `${p.hoursLogged}h`],
+          ['Missed Visits', String(p.missedVisits)],
         ].map(([label, value]) => (
           <div key={label} className="min-w-0">
             <dt className="text-ink-muted text-[11px] tracking-wide uppercase">{label}</dt>
