@@ -14,8 +14,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { CareDocument, DocumentCategory, ReviewState } from './documents-data'
 
-/* Big enough that the client side filters see a full library; the tab paginates. */
-const PAGE_SIZE = 200
+/* The backend caps pageSize at 100; the tab filters and paginates over this set. */
+const PAGE_SIZE = 100
 
 /* --------------------------- backend response ----------------------------- */
 

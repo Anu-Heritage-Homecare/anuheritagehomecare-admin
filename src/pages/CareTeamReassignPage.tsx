@@ -152,7 +152,7 @@ function ReassignView({
   // to themselves and a shared name never hides or shows the wrong person.
   const onTeam = useMemo(() => new Set(team.map((m) => m.caregiverId)), [team])
   const all = useMemo(
-    () => (candidatesQuery.data ?? []).filter((c) => !onTeam.has(c.id)),
+    () => (candidatesQuery.data ?? []).filter((c) => !onTeam.has(c.userId)),
     [candidatesQuery.data, onTeam],
   )
   const branches = useMemo(
@@ -203,7 +203,7 @@ function ReassignView({
     remove.reset()
     assign.mutate(
       {
-        caregiverId: caregiver.id,
+        caregiverId: caregiver.userId,
         role: roleToken,
         scheduleLabel: member?.schedule,
         specialization: member?.specialization,
