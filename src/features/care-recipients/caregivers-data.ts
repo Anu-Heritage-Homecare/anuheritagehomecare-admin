@@ -17,6 +17,8 @@ export type CaregiverRole =
 
 export interface TeamMember {
   id: string
+  /** The caregiver's user id (the row `id` is the assignment id). */
+  caregiverId: string
   name: string
   role: CaregiverRole
   status: CaregiverStatus
@@ -24,6 +26,8 @@ export interface TeamMember {
   schedule: string
   /** Actually logged, not scheduled — the grid shows responsibility. */
   hoursThisMonth: string
+  /** Scheduled visits from today onward, for the move or release prompt. */
+  upcomingVisits: number
   rating: number
   certifications: string[]
   /** The one carrying day-to-day delivery; highlighted in the list. */
@@ -78,6 +82,8 @@ const records: Record<string, CaregiverRecord> = {
     team: [
       {
         id: 'tm1',
+        caregiverId: 'cg-tm1',
+        upcomingVisits: 0,
         name: 'Sarah Williams',
         role: 'Primary Caregiver',
         status: 'active',
@@ -90,6 +96,8 @@ const records: Record<string, CaregiverRecord> = {
       },
       {
         id: 'tm2',
+        caregiverId: 'cg-tm2',
+        upcomingVisits: 0,
         name: 'David Park',
         role: 'Backup Caregiver',
         status: 'available',
@@ -101,6 +109,8 @@ const records: Record<string, CaregiverRecord> = {
       },
       {
         id: 'tm3',
+        caregiverId: 'cg-tm3',
+        upcomingVisits: 0,
         name: 'Emma Wilson',
         role: 'Clinical Nurse',
         status: 'active',
@@ -112,6 +122,8 @@ const records: Record<string, CaregiverRecord> = {
       },
       {
         id: 'tm4',
+        caregiverId: 'cg-tm4',
+        upcomingVisits: 0,
         name: 'Maria Garcia',
         role: 'Relief Caregiver',
         status: 'available',
@@ -123,6 +135,8 @@ const records: Record<string, CaregiverRecord> = {
       },
       {
         id: 'tm5',
+        caregiverId: 'cg-tm5',
+        upcomingVisits: 0,
         name: 'Mike Chen',
         role: 'Care Coordinator',
         status: 'active',
@@ -277,6 +291,8 @@ function teamMember(
   const shifts = record?.availability ?? []
   return {
     id,
+    caregiverId: record?.id ?? id,
+    upcomingVisits: 0,
     name,
     role,
     status: record?.status === 'active' ? 'active' : 'off-duty',

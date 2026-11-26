@@ -199,7 +199,9 @@ function MemberCard({ member, recipientId }: { member: TeamMember; recipientId: 
       <RemoveFromTeamDialog
         recipientId={recipientId}
         assignmentId={member.id}
+        caregiverId={member.caregiverId}
         caregiverName={member.name}
+        upcomingVisits={member.upcomingVisits}
         open={removing}
         onClose={() => setRemoving(false)}
       />

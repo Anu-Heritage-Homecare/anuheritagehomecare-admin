@@ -17,6 +17,7 @@ import {
   useCareTeamWrites,
   type CareTeamRoleToken,
 } from '@/features/care-recipients/useCareTeamWrites'
+import { useReassignRecipientVisits } from '@/features/care-recipients/useReassignRecipientVisits'
 import { useRecipientProfile } from '@/features/care-recipients/useRecipientProfile'
 import type { RecipientProfile } from '@/features/care-recipients/profile-data'
 import { Avatar } from '@/components/ui/Avatar'
@@ -140,7 +141,11 @@ function ReassignView({
 
   const roleToken = ROLE_TOKEN[seat.role]
   const { assign, remove } = useCareTeamWrites(profile.id)
+  const reassignVisits = useReassignRecipientVisits(profile.id)
   const candidatesQuery = useAssignableCaregivers(roleToken !== undefined)
+  // When reassigning a caregiver who holds upcoming visits, decide what happens
+  // to those visits: move them to the incoming caregiver, release them, or leave.
+  const [visitAction, setVisitAction] = useState<'move' | 'unassign' | 'leave'>('move')
 
   // Caregivers already holding a seat on this team are not offered again.
   const onTeam = useMemo(
@@ -207,11 +212,12 @@ function ReassignView({
       },
       {
         onSuccess: () => {
-          // Reassigning hands the seat over: drop the outgoing assignment too.
+          // Reassigning hands the seat over: drop the outgoing assignment too,
+          // then move or release that caregiver's upcoming visits.
           if (member) {
             remove.mutate(
               { assignmentId: member.id, reason },
-              { onSuccess: () => navigate(back) },
+              { onSuccess: () => finishVisits(member, caregiver.id) },
             )
           } else {
             navigate(back)
@@ -219,6 +225,20 @@ function ReassignView({
         },
       },
     )
+  }
+
+  const finishVisits = (outgoing: TeamMember, incomingCaregiverId: string): void => {
+    if (outgoing.upcomingVisits > 0 && visitAction !== 'leave') {
+      reassignVisits.mutate(
+        {
+          fromCaregiverId: outgoing.caregiverId,
+          toCaregiverId: visitAction === 'move' ? incomingCaregiverId : undefined,
+        },
+        { onSuccess: () => navigate(back) },
+      )
+    } else {
+      navigate(back)
+    }
   }
 
   const facts = [
@@ -282,6 +302,36 @@ function ReassignView({
           ))}
         </dl>
       </section>
+
+      {member && member.upcomingVisits > 0 && (
+        <fieldset className="card p-4 sm:px-7 sm:py-5">
+          <legend className="text-ink text-sm font-semibold">
+            {member.name} has {member.upcomingVisits} upcoming visit
+            {member.upcomingVisits === 1 ? '' : 's'}
+          </legend>
+          <p className="text-ink-muted mt-1 text-sm">
+            Choose what happens to those scheduled visits when the seat changes hands.
+          </p>
+          <div className="mt-3 space-y-2">
+            {[
+              { value: 'move' as const, label: 'Move them to the new caregiver' },
+              { value: 'unassign' as const, label: 'Unassign them (leave for the office to restaff)' },
+              { value: 'leave' as const, label: `Leave them with ${member.name}` },
+            ].map((opt) => (
+              <label key={opt.value} className="flex items-center gap-3 text-sm">
+                <input
+                  type="radio"
+                  name="visit-action"
+                  checked={visitAction === opt.value}
+                  onChange={() => setVisitAction(opt.value)}
+                  className="size-4"
+                />
+                <span className="text-ink">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       {roleToken === undefined ? (
         <p className="text-ink-muted card flex items-start gap-2 p-5 text-sm">

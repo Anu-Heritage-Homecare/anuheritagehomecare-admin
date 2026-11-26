@@ -35,6 +35,7 @@ interface TeamMemberDto {
   specialization: string | null
   scheduleLabel: string | null
   hoursThisMonth: number
+  upcomingVisits: number
   rating: number | null
   certifications: string[]
 }
@@ -132,12 +133,14 @@ function toTeam(dto: CaregiversResponseDto): TeamMember[] {
     const role = toRole(m.role)
     return {
       id: m.assignmentId,
+      caregiverId: m.caregiverId,
       name: m.name ?? DASH,
       role,
       status: toStatus(m.status),
       specialization: m.specialization ?? 'Not recorded',
       schedule: m.scheduleLabel ?? 'No schedule set',
       hoursThisMonth: `${m.hoursThisMonth}h`,
+      upcomingVisits: m.upcomingVisits,
       rating: m.rating ?? 0,
       certifications: m.certifications,
       ...(role === 'Primary Caregiver' ? { primary: true } : {}),

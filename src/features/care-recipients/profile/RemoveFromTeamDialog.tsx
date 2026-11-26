@@ -3,6 +3,7 @@ import { Drawer } from '@/components/ui/Drawer'
 import { SelectBox } from '@/components/ui/SelectBox'
 import { ApiError } from '@/lib/api'
 import { useCareTeamWrites } from '../useCareTeamWrites'
+import { useReassignRecipientVisits } from '../useReassignRecipientVisits'
 
 const removalReasons = [
   'Caregiver leaving or on leave',
@@ -21,29 +22,55 @@ const removalReasons = [
 export function RemoveFromTeamDialog({
   recipientId,
   assignmentId,
+  caregiverId,
   caregiverName,
+  upcomingVisits,
   open,
   onClose,
 }: {
   recipientId: string
   assignmentId: string
+  caregiverId: string
   caregiverName: string
+  upcomingVisits: number
   open: boolean
   onClose: () => void
 }) {
   const [reason, setReason] = useState('')
+  const [unassignVisits, setUnassignVisits] = useState(true)
   const { remove } = useCareTeamWrites(recipientId)
+  const reassignVisits = useReassignRecipientVisits(recipientId)
 
-  const saveError = remove.isError
-    ? remove.error instanceof ApiError
-      ? remove.error.message
-      : 'Could not remove the caregiver. Please try again.'
-    : null
+  const saveError =
+    remove.isError || reassignVisits.isError
+      ? (remove.error ?? reassignVisits.error) instanceof ApiError
+        ? ((remove.error ?? reassignVisits.error) as ApiError).message
+        : 'Could not remove the caregiver. Please try again.'
+      : null
+  const pending = remove.isPending || reassignVisits.isPending
 
   const close = () => {
     setReason('')
+    setUnassignVisits(true)
     remove.reset()
+    reassignVisits.reset()
     onClose()
+  }
+
+  const submit = () => {
+    remove.mutate(
+      { assignmentId, reason },
+      {
+        onSuccess: () => {
+          if (upcomingVisits > 0 && unassignVisits) {
+            // Release their future visits; no replacement, so leave unassigned.
+            reassignVisits.mutate({ fromCaregiverId: caregiverId }, { onSuccess: close })
+          } else {
+            close()
+          }
+        },
+      },
+    )
   }
 
   return (
@@ -79,6 +106,24 @@ export function RemoveFromTeamDialog({
           </SelectBox>
         </label>
 
+        {upcomingVisits > 0 && (
+          <label className="border-line flex items-start gap-3 rounded-lg border bg-sunken p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={unassignVisits}
+              onChange={(e) => setUnassignVisits(e.target.checked)}
+              className="mt-0.5 size-4"
+            />
+            <span className="text-ink">
+              Unassign their {upcomingVisits} upcoming visit{upcomingVisits === 1 ? '' : 's'}
+              <span className="text-ink-muted block text-xs">
+                Future scheduled visits are released for the office to restaff. Uncheck to leave
+                them assigned to {caregiverName}.
+              </span>
+            </span>
+          </label>
+        )}
+
         <div className="border-line flex items-center justify-end gap-3 border-t pt-4">
           <button
             type="button"
@@ -89,13 +134,11 @@ export function RemoveFromTeamDialog({
           </button>
           <button
             type="button"
-            disabled={!reason || remove.isPending}
-            onClick={() =>
-              remove.mutate({ assignmentId, reason }, { onSuccess: close })
-            }
+            disabled={!reason || pending}
+            onClick={submit}
             className="inline-flex h-10 items-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
           >
-            {remove.isPending ? 'Removing…' : 'Remove from team'}
+            {pending ? 'Removing…' : 'Remove from team'}
           </button>
         </div>
       </div>
