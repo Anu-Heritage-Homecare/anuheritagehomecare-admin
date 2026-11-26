@@ -34,9 +34,13 @@ const timeLabel = new Intl.DateTimeFormat('en-US', {
   hour12: true,
 })
 
-/** A "HH:MM" clock to "8:00 AM". */
+/** A "HH:MM" clock to "8:00 AM". Already formatted times (e.g. the live
+ * scheduling API sends "9:00 AM") and any unparseable input pass through
+ * unchanged, so a stray value can never throw "Invalid time value". */
 export function formatTime(clock: string): string {
+  if (/[AP]M\s*$/i.test(clock)) return clock.trim()
   const [h, m] = clock.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return clock
   const base = new Date(Date.UTC(2000, 0, 1, h, m))
   return timeLabel.format(base)
 }

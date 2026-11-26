@@ -39,6 +39,7 @@ interface ProfileDto {
     priority: string
     primaryDiagnosis: string | null
     careLevel: string | null
+    hasCareSchedule: boolean
   }
   personalInformation: {
     phone: string | null
@@ -226,6 +227,7 @@ function toProfile(dto: ProfileDto): RecipientProfile {
     status: toStatus(header.status),
     priority: toPriority(header.priority),
     lastVisit: recentVisits[0]?.date ?? null,
+    hasCareSchedule: header.hasCareSchedule,
     sex: header.gender || 'Not recorded',
     personal: {
       phone: pi.phone ?? DASH,

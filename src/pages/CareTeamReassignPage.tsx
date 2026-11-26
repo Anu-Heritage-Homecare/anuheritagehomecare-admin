@@ -17,7 +17,7 @@ import {
   useCareTeamWrites,
   type CareTeamRoleToken,
 } from '@/features/care-recipients/useCareTeamWrites'
-import { getRecipientProfile } from '@/features/care-recipients/profile-data'
+import { useRecipientProfile } from '@/features/care-recipients/useRecipientProfile'
 import type { RecipientProfile } from '@/features/care-recipients/profile-data'
 import { Avatar } from '@/components/ui/Avatar'
 import { PriorityBadge } from '@/components/ui/StatusBadge'
@@ -71,15 +71,13 @@ interface Seat {
 export function CareTeamReassignPage() {
   const { id = '', memberId } = useParams()
   const [params] = useSearchParams()
-  const profile = useMemo(() => getRecipientProfile(id), [id])
   const back = id ? `/care-recipients/${id}/caregivers` : '/care-recipients'
-  // The seat being reassigned is read live, so the outgoing member carries the
-  // backend assignmentId the remove action needs.
+  // The recipient header and the care team are both read from the backend; the
+  // outgoing member carries the backend assignmentId the remove action needs.
+  const { data: profile, isPending: profilePending } = useRecipientProfile(id)
   const { data: record, isPending, isError, error, refetch } = useRecipientCaregivers(id)
 
-  if (!profile) return <Navigate to={back} replace />
-
-  if (isPending) {
+  if (isPending || profilePending) {
     return (
       <div className="card text-ink-subtle flex items-center justify-center gap-2 px-6 py-20 text-sm">
         <Loader2 className="size-4 animate-spin" strokeWidth={2} />
@@ -103,6 +101,8 @@ export function CareTeamReassignPage() {
       </div>
     )
   }
+
+  if (!profile) return <Navigate to={back} replace />
 
   const team = record.team
 
@@ -252,6 +252,19 @@ function ReassignView({
             : `Select who should join ${profile.name}’s care team as ${seat.role}.`}
         </p>
       </div>
+
+      {assigning && !profile.hasCareSchedule && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" strokeWidth={2.2} aria-hidden="true" />
+          <p>
+            {profile.name} has no active care plan on file yet. You can still assign a caregiver, but
+            there is no recurring schedule to generate visits from until a care plan is set.
+          </p>
+        </div>
+      )}
 
       <section aria-labelledby="seat-strip" className="card p-4 sm:px-7 sm:py-5">
         <div className="flex flex-wrap items-center gap-3">

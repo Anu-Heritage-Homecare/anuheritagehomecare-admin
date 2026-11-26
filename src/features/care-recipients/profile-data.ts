@@ -80,6 +80,9 @@ export interface CareNote {
 
 export interface RecipientProfile extends Recipient {
   sex: string
+  /** Whether the recipient has a recurring care schedule (days, start, length)
+   * on file. False means there is no care plan to warn about or generate from. */
+  hasCareSchedule: boolean
   personal: Personal
   summary: CareSummary
   quickStats: QuickStat[]
@@ -100,6 +103,7 @@ type Detail = Omit<
 const details: Record<string, Detail> = {
   'cr-001': {
     sex: 'Female',
+    hasCareSchedule: true,
     personal: {
       phone: '(555) 234-5678',
       email: 'margaret.johnson@example.com',
@@ -197,6 +201,7 @@ function synthesise(r: Recipient): Detail {
 
   return {
     sex: 'Not recorded',
+    hasCareSchedule: true,
     personal: {
       phone: '(555) 000-0000',
       email: `${r.name.toLowerCase().replace(/\s+/g, '.')}@example.com`,

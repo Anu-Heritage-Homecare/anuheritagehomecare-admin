@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { CalendarOff, Loader2 } from 'lucide-react'
+import { CalendarOff, CalendarPlus, Loader2 } from 'lucide-react'
 import type { RecipientProfile } from '../profile-data'
+import { GenerateVisitsDialog } from './GenerateVisitsDialog'
 import {
   VISITS_PAGE_SIZE,
   formatVisitDate,
@@ -53,6 +54,32 @@ export function VisitsTab() {
 
   const [filters, setFilters] = useState<VisitFilterState>(initialFilters)
   const [page, setPage] = useState(1)
+  const [generateOpen, setGenerateOpen] = useState(false)
+
+  const generateButton = (
+    <button
+      type="button"
+      onClick={() => setGenerateOpen(true)}
+      disabled={!profile.hasCareSchedule}
+      title={
+        profile.hasCareSchedule
+          ? undefined
+          : 'Set a recurring care schedule before generating visits'
+      }
+      className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <CalendarPlus className="size-4" strokeWidth={2.2} aria-hidden="true" />
+      Generate visits
+    </button>
+  )
+  const generateDialog = (
+    <GenerateVisitsDialog
+      recipientId={profile.id}
+      recipientName={profile.name}
+      open={generateOpen}
+      onClose={() => setGenerateOpen(false)}
+    />
+  )
 
   const visits = useMemo(() => history?.visits ?? [], [history])
 
@@ -120,9 +147,11 @@ export function VisitsTab() {
           No visit history
         </h2>
         <p className="text-ink-muted mt-1 max-w-sm text-sm">
-          {profile.name} has no recorded visits yet. Completed visits appear
-          here once caregivers start checking in.
+          {profile.name} has no recorded visits yet. Generate them from the care
+          schedule, or they appear here once caregivers start checking in.
         </p>
+        <div className="mt-5">{generateButton}</div>
+        {generateDialog}
       </div>
     )
   }
@@ -159,6 +188,12 @@ export function VisitsTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-ink text-base font-semibold tracking-tight">Visits</h2>
+        {generateButton}
+      </div>
+      {generateDialog}
+
       <VisitStats stats={history.stats} />
 
       <VisitFilters

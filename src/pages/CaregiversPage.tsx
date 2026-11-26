@@ -175,13 +175,13 @@ export function CaregiversPage() {
             work on, so both cover whatever the visit log holds.
           </p>
         </div>
-        <button
-          type="button"
+        <Link
+          to="/caregivers/new"
           className="bg-brand-600 hover:bg-brand-700 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"
         >
           <Plus className="size-4" strokeWidth={2.2} aria-hidden="true" />
           Add caregiver
-        </button>
+        </Link>
       </header>
 
       <section aria-labelledby="roster-kpis">

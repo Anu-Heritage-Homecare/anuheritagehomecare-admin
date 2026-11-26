@@ -9,9 +9,9 @@ import {
   X,
 } from 'lucide-react'
 import type { CareRequest } from './requests-data'
+import { useCareRequestActions } from '@/features/billing/useCareRequests'
 import {
   blockers,
-  canApprove,
   daysWaiting,
   docKindLabels,
   familyNameFor,
@@ -78,8 +78,13 @@ export function RequestDetail({
   const fit = planFit(request)
   const gaps = serviceGaps(request)
   const plan = planById[request.planId]
-  const approvable = canApprove(request)
+  // The decision is gated on the backend status only. The blockers/documents/
+  // plan panels below are the request rail's unbacked mock (no backend source),
+  // so they are advisory and must not gate the real approve call.
+  const { approve, decline } = useCareRequestActions()
   const decided = request.decision !== 'undecided'
+  const busy = approve.isPending || decline.isPending
+  const failed = approve.isError || decline.isError
 
   return (
     <div className="card overflow-hidden">
@@ -122,18 +127,14 @@ export function RequestDetail({
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            aria-disabled={!approvable}
-            aria-describedby={
-              approvable
-                ? undefined
-                : open.length > 0
-                  ? 'request-blockers'
-                  : 'request-decision-note'
-            }
-            onClick={(e) => !approvable && e.preventDefault()}
+            aria-disabled={decided || busy}
+            aria-describedby={decided ? 'request-decision-note' : undefined}
+            onClick={() => {
+              if (!decided && !busy) approve.mutate(request.id)
+            }}
             className={cn(
               'inline-flex h-10 min-w-32 flex-1 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium whitespace-nowrap',
-              approvable
+              !decided && !busy
                 ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                 : 'bg-sunken text-ink-subtle border-line cursor-not-allowed border',
             )}
@@ -148,11 +149,13 @@ export function RequestDetail({
           </button>
           <button
             type="button"
-            aria-disabled={decided}
-            onClick={(e) => decided && e.preventDefault()}
+            aria-disabled={decided || busy}
+            onClick={() => {
+              if (!decided && !busy) decline.mutate({ id: request.id })
+            }}
             className={cn(
               'inline-flex h-10 min-w-24 flex-1 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium whitespace-nowrap',
-              decided
+              decided || busy
                 ? 'bg-sunken text-ink-subtle border-line cursor-not-allowed border'
                 : 'bg-red-600 text-white hover:bg-red-700',
             )}
@@ -181,6 +184,12 @@ export function RequestDetail({
           >
             This request was already {request.decision}; the decision buttons
             are inactive.
+          </p>
+        )}
+
+        {failed && (
+          <p role="alert" className="mt-2 text-xs font-medium text-red-700">
+            Could not save the decision. Please try again.
           </p>
         )}
       </div>
